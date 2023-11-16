@@ -169,13 +169,15 @@ def sample_ellipses(
     rot = np.pi / 2 * np.random.rand(c)
 
     p = np.stack([weights, ax_1, ax_2, cen_x, cen_y, rot]).transpose()
-    space = odl.discr.discr_sequence_space(n)
-
+    # n is tuple (height, width)
+    # old : space = odl.discr.discr_sequence_space(n)
+    space = odl.uniform_discr([-1,-1], [1, 1], [n[0], n[1]])
     coord_x = np.linspace(-1.0, 1.0, n[0])
     coord_y = np.linspace(-1.0, 1.0, n[1])
     m_x, m_y = np.meshgrid(coord_x, coord_y)
 
     X = np.zeros(n)
+    breakpoint()
     for e in range(p.shape[0]):
         E = -np.ones(n)
         while E.min() < 0:
@@ -194,12 +196,12 @@ def sample_ellipses(
 
     if normalize:
         X = X / X.max()
-
+    breakpoint()
     return X, torch.tensor(c, dtype=torch.float)
 
 
 class IPDataset(torch.utils.data.Dataset):
-    """ Datasets for imaging inverse problems.
+    """Datasets for imaging inverse problems.
 
     Loads image signals created by `create_iterable_dataset` from a directory.
 

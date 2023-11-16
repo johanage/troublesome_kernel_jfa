@@ -5,7 +5,7 @@ import torch
 import torchvision
 
 from data_management import IPDataset, Jitter, SimulateMeasurements, ToComplex
-from networks import IterativeNet, UNet
+from networks import UNet
 from operators import (
     Fourier,
     LearnableInverterFourier,
@@ -18,8 +18,9 @@ import config  # isort:skip
 
 # ----- global configuration -----
 mpl.use("agg")
-device = torch.device("cuda:0")
-torch.cuda.set_device(0)
+device = torch.device("cpu")
+#device = torch.device("cuda:0")
+#torch.cuda.set_device(0)
 
 # ----- measurement configuration -----
 mask_func = RadialMaskFunc(config.n, 40)
@@ -31,23 +32,13 @@ inverter = LearnableInverterFourier(config.n, mask, learnable=False)
 
 
 # ----- network configuration -----
-subnet_params = {
+unet_params = {
     "in_channels": 2,
     "drop_factor": 0.0,
     "base_features": 32,
     "out_channels": 2,
 }
-subnet = UNet
-
-it_net_params = {
-    "num_iter": 1,
-    "lam": 0.0,
-    "lam_learnable": False,
-    "final_dc": False,
-    "resnet_factor": 1.0,
-    "operator": OpA,
-    "inverter": inverter,
-}
+unet = UNet
 
 # ----- training configuration -----
 mseloss = torch.nn.MSELoss(reduction="sum")
@@ -108,9 +99,7 @@ os.makedirs(train_params["save_path"][-1], exist_ok=True)
 with open(
     os.path.join(train_params["save_path"][-1], "hyperparameters.txt"), "w"
 ) as file:
-    for key, value in subnet_params.items():
-        file.write(key + ": " + str(value) + "\n")
-    for key, value in it_net_params.items():
+    for key, value in unet_params.items():
         file.write(key + ": " + str(value) + "\n")
     for key, value in train_params.items():
         file.write(key + ": " + str(value) + "\n")
@@ -121,8 +110,8 @@ with open(
     file.write("train_phases" + ": " + str(train_phases) + "\n")
 
 # ------ construct network and train -----
-subnet = subnet(**subnet_params).to(device)
-it_net = IterativeNet(subnet, **it_net_params).to(device)
+unet = unet(**unet_params).to(device)
+# get train and val data
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
 
@@ -137,4 +126,4 @@ for i in range(train_phases):
     for key, value in train_params_cur.items():
         print(key + ": " + str(value))
 
-    it_net.train_on(train_data, val_data, **train_params_cur)
+    unet.train_on(train_data, val_data, **train_params_cur)

@@ -3,8 +3,8 @@ import os
 from data_management import sample_ellipses
 
 N = 256;
-
-DATA_PATH = os.path.join("/mn/kadingir/vegardantun_000000/nobackup/ellipses/raw_data")
+ROOT = "/home/johanfag/"
+DATA_PATH = os.path.join(ROOT + "/cs/master/codebase/data/ellipses")
 RESULTS_PATH = os.path.join(f"models")
 
 # ----- random seeds -----

@@ -1,3 +1,11 @@
+"""
+DESCRIPTION OF WHAT THIS SCRIPT DOES
+------------------------------------
+Terms
+    - jitter, means that noise, typically Gaussian, is added to the data while training to reduce overfit
+"""
+
+
 import os
 
 import matplotlib as mpl
@@ -5,7 +13,7 @@ import torch
 import torchvision
 
 from data_management import IPDataset, SimulateMeasurements, ToComplex
-from networks import IterativeNet, UNet
+from networks import UNet
 from operators import Fourier as Fourier
 from operators import Fourier_matrix as Fourier_m
 from operators import (
@@ -19,8 +27,10 @@ import config  # isort:skip
 
 # ----- global configuration -----
 mpl.use("agg")
-device = torch.device("cuda:0")
-torch.cuda.set_device(0)
+device = torch.device("cpu")
+# if GPU available
+#device = torch.device("cuda:0")
+#torch.cuda.set_device(0)
 
 # ----- measurement configuration -----
 mask_func = RadialMaskFunc(config.n, 40)
@@ -33,23 +43,13 @@ inverter = LearnableInverterFourier(config.n, mask, learnable=False)
 
 
 # ----- network configuration -----
-subnet_params = {
+unet_params = {
     "in_channels": 2,
     "drop_factor": 0.0,
     "base_features": 32,
     "out_channels": 2,
 }
-subnet = UNet
-
-it_net_params = {
-    "num_iter": 8,
-    "lam": 8 * [0.1],
-    "lam_learnable": True,
-    "final_dc": True,
-    "resnet_factor": 1.0,
-    "operator": OpA_m,
-    "inverter": inverter,
-}
+unet = UNet
 
 # ----- training configuration -----
 mseloss = torch.nn.MSELoss(reduction="sum")
@@ -110,9 +110,7 @@ os.makedirs(train_params["save_path"][-1], exist_ok=True)
 with open(
     os.path.join(train_params["save_path"][-1], "hyperparameters.txt"), "w"
 ) as file:
-    for key, value in subnet_params.items():
-        file.write(key + ": " + str(value) + "\n")
-    for key, value in it_net_params.items():
+    for key, value in unet_params.items():
         file.write(key + ": " + str(value) + "\n")
     for key, value in train_params.items():
         file.write(key + ": " + str(value) + "\n")
@@ -123,31 +121,12 @@ with open(
     file.write("train_phases" + ": " + str(train_phases) + "\n")
 
 # ------ construct network and train -----
-subnet_tmp = subnet(**subnet_params).to(device)
-it_net_tmp = IterativeNet(
-    subnet_tmp,
-    **{
-        "num_iter": 1,
-        "lam": 0.0,
-        "lam_learnable": False,
-        "final_dc": False,
-        "resnet_factor": 1.0,
-        "operator": OpA,
-        "inverter": inverter,
-    }
-).to(device)
-it_net_tmp.load_state_dict(
-    torch.load(
-        f"{config.RESULTS_PATH}/Fourier_UNet_jitter_v3_train_phase_2/model_weights.pt",
-        map_location=torch.device(device),
-    )
-)
-subnet = it_net_tmp.subnet
-it_net = IterativeNet(subnet, **it_net_params).to(device)
+unet = unet(**unet_params)
 
+# get train and validation data
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
-
+# run training 
 for i in range(train_phases):
     train_params_cur = {}
     for key, value in train_params.items():
@@ -159,4 +138,4 @@ for i in range(train_phases):
     for key, value in train_params_cur.items():
         print(key + ": " + str(value))
 
-    it_net.train_on(train_data, val_data, **train_params_cur)
+    unet.train_on(train_data, val_data, **train_params_cur)
