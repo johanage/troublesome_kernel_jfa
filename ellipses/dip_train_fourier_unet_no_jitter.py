@@ -66,6 +66,8 @@ def loss_func(pred, tar):
     )
 
 
+
+    
 train_phases = 2
 train_params = {
     "num_epochs": [35, 6],
@@ -88,14 +90,14 @@ train_params = {
     "scheduler": torch.optim.lr_scheduler.StepLR,
     "scheduler_params": {"step_size": 1, "gamma": 1.0},
     "acc_steps": [1, 200],
-    "train_transform": torchvision.transforms.Compose(
-        [ToComplex(), SimulateMeasurements(OpA)]
-    ),
-    "val_transform": torchvision.transforms.Compose(
-        [ToComplex(), SimulateMeasurements(OpA)],
-    ),
-    "train_loader_params": {"shuffle": True, "num_workers": 8},
-    "val_loader_params": {"shuffle": False, "num_workers": 8},
+#    "train_transform": torchvision.transforms.Compose(
+#        [ToComplex(), SimulateMeasurements(OpA)]
+#    ),
+#    "val_transform": torchvision.transforms.Compose(
+#        [ToComplex(), SimulateMeasurements(OpA)],
+#    ),
+#    "train_loader_params": {"shuffle": True, "num_workers": 8},
+#    "val_loader_params": {"shuffle": False, "num_workers": 8},
 }
 
 # ----- data configuration -----
@@ -127,10 +129,6 @@ with open(
 
 # ------ construct network and train -----
 unet = unet(**unet_params)
-param_dir = "/itf-fi-ml/home/johanfag/master/codebase/troublesome_kernel_jfa/ellipses/models/Fourier_UNet_it_no_jitter_train_phase_1/"
-file_param = "model_weights_epoch23.pt"
-params_loaded = torch.load(param_dir + file_param)
-unet.load_state_dict(params_loaded)
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
@@ -139,8 +137,16 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # Note that the second dimension consist of a 2-tuple
 # image x has shape (2, N, N), since x in C^{N x N}
 # measurement y has shape (2, m) since y in C^m
-train_data = train_data("train", **train_data_params)
-val_data = val_data("val", **val_data_params)
+sample = torch.load("/itf-fi-ml/home/johanfag/master/codebase/data/ellipses/test/sample_0.pt")
+sample = sample[None].repeat(2,1,1)
+# set imaginary values to zero
+sample[1] = torch.zeros_like(sample[1])
+measurement = OpA(sample)
+assert 0, "stop before training to to check status"
+#train_data = train_data("train", **train_data_params)
+#val_data = val_data("val", **val_data_params)
+
+#TODO rewrite training loop for DIP
 # run training 
 for i in range(train_phases):
     train_params_cur = {}

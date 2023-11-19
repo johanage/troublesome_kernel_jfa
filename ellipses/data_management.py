@@ -10,7 +10,7 @@ import torch
 from tqdm import tqdm
 
 from operators import to_complex
-
+torch.device("cpu")
 
 # ----- Dataset creation, saving, and loading -----
 
@@ -177,7 +177,6 @@ def sample_ellipses(
     m_x, m_y = np.meshgrid(coord_x, coord_y)
 
     X = np.zeros(n)
-    breakpoint()
     for e in range(p.shape[0]):
         E = -np.ones(n)
         while E.min() < 0:
@@ -196,7 +195,6 @@ def sample_ellipses(
 
     if normalize:
         X = X / X.max()
-    breakpoint()
     return X, torch.tensor(c, dtype=torch.float)
 
 

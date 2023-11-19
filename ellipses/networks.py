@@ -51,10 +51,9 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
     ):
         inp, tar = batch
         #breakpoint()
-        #inp = torch.moveaxis(inp, 0, 1)
         inp = inp.to(self.device)
         tar = tar.to(self.device)
-        pred = self.forward(tar)#inp)
+        pred = self.forward(inp)
 
         loss = loss_func(pred, tar) / acc_steps
         loss.backward()
@@ -89,8 +88,9 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
     ):
 
         self._print_info()
-
-        logging = logging.append(
+        # DataFrame.append: Deprecated since version 1.4.0: Use concat() instead. 
+        #logging = logging.append(
+        app_log = pd.DataFrame(
             {
                 "loss": loss.item(),
                 "val_loss": v_loss.item(),
@@ -100,7 +100,11 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
                 "val_rel_l2_error": l2_error(
                     v_pred, to_complex(v_tar), relative=True, squared=False
                 )[0].item(),
-            },
+            }, 
+            index = [0]
+        ) 
+        logging = pd.concat(
+            [logging, app_log],
             ignore_index=True,
             sort=False,
         )
@@ -111,7 +115,7 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
             fig = self._create_figure(
                 logging, loss, inp, tar, pred, v_loss, v_inp, v_tar, v_pred
             )
-
+            #breakpoint()
             os.makedirs(save_path, exist_ok=True)
             torch.save(
                 self.state_dict(),
@@ -284,16 +288,18 @@ class UNet(InvNet):
     """
 
     def __init__(
-        self, in_channels=1, out_channels=1, base_features=32, drop_factor=0.0,
+        self, in_channels=1, out_channels=1, base_features=32, drop_factor=0.0, inverter = None, operator = None,
     ):
         # set properties of UNet
         super(UNet, self).__init__()
-
+        self.inverter = inverter
+        self.operator = operator
         self.encoder1 = UNet._conv_block(
             in_channels,
             base_features,
             drop_factor=drop_factor,
             block_name="encoding_1",
+            device = self.device,
         )
         self.pool1 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -302,6 +308,7 @@ class UNet(InvNet):
             base_features * 2,
             drop_factor=drop_factor,
             block_name="encoding_2",
+            device = self.device,
         )
         self.pool2 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -310,6 +317,7 @@ class UNet(InvNet):
             base_features * 4,
             drop_factor=drop_factor,
             block_name="encoding_3",
+            device = self.device,
         )
         self.pool3 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -318,6 +326,7 @@ class UNet(InvNet):
             base_features * 8,
             drop_factor=drop_factor,
             block_name="encoding_4",
+            device = self.device,
         )
         self.pool4 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -326,43 +335,52 @@ class UNet(InvNet):
             base_features * 16,
             drop_factor=drop_factor,
             block_name="bottleneck",
+            device = self.device,
         )
 
         self.upconv4 = torch.nn.ConvTranspose2d(
             base_features * 16, base_features * 8, kernel_size=2, stride=2,
         )
+        self.upconv4.to(self.device)
         self.decoder4 = UNet._conv_block(
             base_features * 16,
             base_features * 8,
             drop_factor=drop_factor,
             block_name="decoding_4",
+            device = self.device,
         )
         self.upconv3 = torch.nn.ConvTranspose2d(
             base_features * 8, base_features * 4, kernel_size=2, stride=2
         )
+        self.upconv3.to(self.device)
         self.decoder3 = UNet._conv_block(
             base_features * 8,
             base_features * 4,
             drop_factor=drop_factor,
             block_name="decoding_3",
+            device = self.device,
         )
         self.upconv2 = torch.nn.ConvTranspose2d(
             base_features * 4, base_features * 2, kernel_size=2, stride=2
         )
+        self.upconv2.to(self.device)
         self.decoder2 = UNet._conv_block(
             base_features * 4,
             base_features * 2,
             drop_factor=drop_factor,
             block_name="decoding_2",
+            device = self.device,
         )
         self.upconv1 = torch.nn.ConvTranspose2d(
             base_features * 2, base_features, kernel_size=2, stride=2
         )
+        self.upconv1.to(self.device)
         self.decoder1 = UNet._conv_block(
             base_features * 2,
             base_features,
             drop_factor=drop_factor,
             block_name="decoding_1",
+            device = self.device,
         )
 
         self.outconv = torch.nn.Conv2d(
@@ -370,9 +388,13 @@ class UNet(InvNet):
             out_channels=out_channels,
             kernel_size=1,
         )
+        self.outconv.to(self.device)
 
     def forward(self, x):
-
+        # In the original code this was done in ItNet step
+        #breakpoint()
+        if self.inverter is not None:
+            x = self.inverter(x)
         enc1 = self.encoder1(x)
 
         enc2 = self.encoder2(self.pool1(enc1))
@@ -402,8 +424,8 @@ class UNet(InvNet):
         return self.outconv(dec1)
 
     @staticmethod
-    def _conv_block(in_channels, out_channels, drop_factor, block_name):
-        return torch.nn.Sequential(
+    def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None):
+        block = torch.nn.Sequential(
             OrderedDict(
                 [
                     (
@@ -435,4 +457,63 @@ class UNet(InvNet):
                 ]
             )
         )
+        if device is not None:
+            block.to(device)
+        return block
+    
+    # plot function
+    def _create_figure(
+        self, logging, loss, inp, tar, pred, v_loss, v_inp, v_tar, v_pred
+    ):
+        def _implot(sub, im):
+            if im.shape[-3] == 2:  # complex image
+                p = sub.imshow(
+                    torch.sqrt(im.pow(2).sum(-3))[0, :, :].detach().cpu()
+                )
+            else:  # real image
+                p = sub.imshow(im[0, 0, :, :].detach().cpu())
+            return p
 
+        fig, subs = plt.subplots(2, 3, clear=True, num=1, figsize=(8, 6))
+
+        # inv = self.inverter(inp)
+        v_inv = self.inverter(v_inp)
+
+        # training and validation loss
+        subs[0, 0].set_title("losses")
+        subs[0, 0].semilogy(logging["loss"], label="train")
+        subs[0, 0].semilogy(logging["val_loss"], label="val")
+        subs[0, 0].legend()
+
+        # validation input
+        p10 = _implot(subs[1, 0], v_inv)
+        subs[1, 0].set_title("val inv")
+        plt.colorbar(p10, ax=subs[1, 0])
+
+        # validation output
+        p01 = _implot(subs[0, 1], v_pred)
+        subs[0, 1].set_title(
+            "val output:\n ||x0-xrec||_2 / ||x0||_2 \n = "
+            "{:1.2e}".format(logging["val_rel_l2_error"].iloc[-1])
+        )
+        plt.colorbar(p01, ax=subs[0, 1])
+
+        # validation target
+        p11 = _implot(subs[1, 1], v_tar)
+        subs[1, 1].set_title("val target")
+        plt.colorbar(p11, ax=subs[1, 1])
+
+        # validation difference
+        p12 = _implot(subs[1, 2], v_pred - v_tar)
+        subs[1, 2].set_title("val diff: x0 - x_pred")
+        plt.colorbar(p12, ax=subs[1, 2])
+
+        # training output
+        p02 = _implot(subs[0, 2], pred)
+        subs[0, 2].set_title(
+            "train output:\n ||x0-xrec||_2 / ||x0||_2 \n = "
+            "{:1.2e}".format(logging["rel_l2_error"].iloc[-1])
+        )
+        plt.colorbar(p02, ax=subs[0, 2])
+
+        return fig
