@@ -50,7 +50,6 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         self, batch_idx, batch, loss_func, optimizer, batch_size, acc_steps
     ):
         inp, tar = batch
-        #breakpoint()
         inp = inp.to(self.device)
         tar = tar.to(self.device)
         pred = self.forward(inp)
