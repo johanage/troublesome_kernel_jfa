@@ -3,8 +3,10 @@ import os
 from data_management import sample_ellipses
 
 N = 256;
-ROOT = "/home/johanfag/"
-DATA_PATH = os.path.join(ROOT + "/cs/master/codebase/data/ellipses")
+#ROOT = "/home/johanfag/cs"
+ROOT = "/itf-fi-ml/home/johanfag"
+#DATA_PATH = os.path.join(ROOT + "/master/codebase/data/ellipses")
+DATA_PATH = os.path.join(ROOT + "/master/codebase/data/ellipses")
 RESULTS_PATH = os.path.join(f"models")
 
 # ----- random seeds -----
@@ -14,7 +16,7 @@ matrix_seed = 3
 
 # Sampling pattern
 use_pattern_from_file = False
-fname_patt = f'/mn/sarpanitu/ansatte-u4/vegarant/storage_stable_NN/samp_patt/XXX.png'
+#fname_patt = f'/mn/sarpanitu/ansatte-u4/vegarant/storage_stable_NN/samp_patt/XXX.png'
 
 # ----- signal configuration -----
 n = (N, N)  # signal dimension
