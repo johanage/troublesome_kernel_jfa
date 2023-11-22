@@ -141,6 +141,7 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # measurement y has shape (2, m) since y in C^m
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
+breakpoint()
 # run training 
 for i in range(train_phases):
     train_params_cur = {}
@@ -148,9 +149,8 @@ for i in range(train_phases):
         train_params_cur[key] = (
             value[i] if isinstance(value, (tuple, list)) else value
         )
-
+    breakpoint() 
     print("Phase {}:".format(i + 1))
     for key, value in train_params_cur.items():
         print(key + ": " + str(value))
-    
     unet.train_on(train_data, val_data, **train_params_cur)

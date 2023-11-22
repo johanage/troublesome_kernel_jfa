@@ -114,7 +114,6 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
             fig = self._create_figure(
                 logging, loss, inp, tar, pred, v_loss, v_inp, v_tar, v_pred
             )
-            #breakpoint()
             os.makedirs(save_path, exist_ok=True)
             torch.save(
                 self.state_dict(),
@@ -179,7 +178,6 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
 
         train_data.transform = train_transform
         val_data.transform = val_transform
-
         train_loader_params = dict(train_loader_params)
         val_loader_params = dict(val_loader_params)
         if "sampler" in train_loader_params:
@@ -391,7 +389,6 @@ class UNet(InvNet):
 
     def forward(self, x):
         # In the original code this was done in ItNet step
-        #breakpoint()
         if self.inverter is not None:
             x = self.inverter(x)
         enc1 = self.encoder1(x)
@@ -423,7 +420,11 @@ class UNet(InvNet):
         return self.outconv(dec1)
 
     @staticmethod
-    def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None):
+    def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.2):
+        if act_func == "leakyrelu":
+            activation_function = torch.nn.LeakyReLU(negative_slope=negative_slope, inplace=True)
+        if act_func == "relu":
+            acivation_function = torch.nn.ReLU(inplace=True)
         block = torch.nn.Sequential(
             OrderedDict(
                 [
@@ -438,7 +439,7 @@ class UNet(InvNet):
                         ),
                     ),
                     (block_name + "bn_1", torch.nn.BatchNorm2d(out_channels)),
-                    (block_name + "relu1", torch.nn.ReLU(True)),
+                    (block_name + act_func + "1", activation_function),
                     (block_name + "dr1", torch.nn.Dropout(p=drop_factor)),
                     (
                         block_name + "conv2",
@@ -451,7 +452,7 @@ class UNet(InvNet):
                         ),
                     ),
                     (block_name + "bn_2", torch.nn.BatchNorm2d(out_channels)),
-                    (block_name + "relu2", torch.nn.ReLU(True)),
+                    (block_name + act_func + "2", activation_function),
                     (block_name + "dr2", torch.nn.Dropout(p=drop_factor)),
                 ]
             )
@@ -516,3 +517,125 @@ class UNet(InvNet):
         plt.colorbar(p02, ax=subs[0, 2])
 
         return fig
+
+from torch import nn
+class Generator(nn.Module):
+    def __init__(
+        self, 
+        img_size        : int = 512, 
+        latent_dim      : int = 100, 
+        channels        : int = 1,
+        num_upsample    : int = 2,
+        factor_upsample : int = 2,
+    ) -> None:
+        """
+        Args:
+         - self       : torch nn module of class Generator
+         - img_size   : image size
+         - latent_dim : dimension of latent variable input, i.e. input to generator
+         - channels   : channels of the output of the generator, 
+                        typically we generate images with 3 or 1 channel
+        """
+        super(Generator, self).__init__()
+        # mathces upsampling that happens two times with a factor of 2
+        self.init_size = img_size // (num_upsample * factor_upsample) 
+        # initial FC layer: (N, latent dimension) -> (N, 128 * image size ** 2)
+        self.l1 = nn.Sequential(nn.Linear(latent_dim, 128 * self.init_size ** 2))
+
+        # Note input is of shape (N, 128, init_size, init_size), init_size = image size // 4
+        self.conv_blocks = nn.Sequential(
+            # block 1  
+            nn.BatchNorm2d(128),
+            #nn.LeakyReLU(0.2, inplace=True),
+            # upsample : (N, 128, init_size, init_size) -> (N, 128, 2*init_size, 2*init_size)
+            nn.Upsample(scale_factor=factor_upsample),
+            # shape stays the same
+            nn.Conv2d(in_channels = 128, out_channels = 128, kernel_size = 3, stride=1, padding=1),
+            # block 2 
+            nn.BatchNorm2d(128, 0.8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # upsample : (N, 128, 2*init_size, 2*init_size) -> (N, 128, 4*init_size, 4*init_size)
+            nn.Upsample(scale_factor=factor_upsample),
+            # reshape channels C : 128 -> 64
+            nn.Conv2d(in_channels = 128, out_channels = 64, kernel_size = 3, stride=1, padding=1),
+            # block 3 : outblock
+            nn.BatchNorm2d(64, 0.8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # reshape channels C : 64 -> channels
+            nn.Conv2d(in_channels = 64, out_channels = channels, kernel_size = 3, stride=1, padding=1),
+            nn.Tanh(),
+        )
+
+    def forward(self, 
+        z : torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+         - z : the latent input variable
+        """
+        # linear layer : (N, latent dimension) -> (N, 128 * (init size)^2)
+        out = self.l1(z)
+        # NOTE: out.shape[0] = N
+        # reshape : (N, 128 * (init size)^2) -> (N, 128, init size, init size) 
+        out = out.view(out.shape[0], 128, self.init_size, self.init_size)
+        # reshape : (N, 128, init size, init size) -> (N, channels, image size, image size) 
+        img = self.conv_blocks(out)
+        return img
+
+
+class Discriminator(nn.Module):
+    def __init__(
+        self, 
+        img_size : int = 512, 
+        channels : int = 1,
+    ) -> None:
+        """
+        Args:
+         - img_size : image size
+         - chanels  : input channel size of the discriminator
+                      that has to match output channel of the generator
+        """
+        super(Discriminator, self).__init__()
+
+        def discriminator_block(
+            in_filters  : int, 
+            out_filters : int, 
+            bn          : bool = True,
+        ) -> list:
+            """
+            Args:
+             - in_filters  : input filter size for the discriminator 2D convolutional blocks
+             - out_filters : output filter size -- || --
+             - bn          : use batch norm (bn) or not
+            
+            Out: list of torch.nn.Modules
+            """
+            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), nn.LeakyReLU(0.2, inplace=True), nn.Dropout2d(0.25)]
+            if bn:
+                block.append(nn.BatchNorm2d(out_filters, 0.8))
+            return block
+
+        self.model = nn.Sequential(
+            *discriminator_block(channels, 16, bn=False),
+            *discriminator_block(16, 32),
+            *discriminator_block(32, 64),
+            *discriminator_block(64, 128),
+        )
+
+        # The height and width of downsampled image
+        ds_size = img_size // 2 ** 4
+        self.adv_layer = nn.Sequential(nn.Linear(128 * ds_size ** 2, 1), nn.Sigmoid())
+
+    def forward(self, 
+        img : torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+         - img : image input from generator
+        Out: validity, tensor of values between 0 and 1 that indicates the 
+             validity of the image, i.e. whether the image is fake or not
+        """
+        out = self.model(img)
+        out = out.view(out.shape[0], -1)
+        validity = self.adv_layer(out)
+        return validity
