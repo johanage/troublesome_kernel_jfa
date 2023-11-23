@@ -422,9 +422,9 @@ class UNet(InvNet):
     @staticmethod
     def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.2):
         if act_func == "leakyrelu":
-            activation_function = torch.nn.LeakyReLU(negative_slope=negative_slope, inplace=True)
+            activation_function = torch.nn.LeakyReLU(negative_slope=negative_slope)#, inplace=True)
         if act_func == "relu":
-            acivation_function = torch.nn.ReLU(inplace=True)
+            acivation_function = torch.nn.ReLU()#inplace=True)
         block = torch.nn.Sequential(
             OrderedDict(
                 [
@@ -553,14 +553,14 @@ class Generator(nn.Module):
             nn.Conv2d(in_channels = 128, out_channels = 128, kernel_size = 3, stride=1, padding=1),
             # block 2 
             nn.BatchNorm2d(128, 0.8),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.LeakyReLU(0.2),# inplace=True),
             # upsample : (N, 128, 2*init_size, 2*init_size) -> (N, 128, 4*init_size, 4*init_size)
             nn.Upsample(scale_factor=factor_upsample),
             # reshape channels C : 128 -> 64
             nn.Conv2d(in_channels = 128, out_channels = 64, kernel_size = 3, stride=1, padding=1),
             # block 3 : outblock
             nn.BatchNorm2d(64, 0.8),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.LeakyReLU(0.2),# inplace=True),
             # reshape channels C : 64 -> channels
             nn.Conv2d(in_channels = 64, out_channels = channels, kernel_size = 3, stride=1, padding=1),
             nn.Tanh(),
@@ -610,7 +610,10 @@ class Discriminator(nn.Module):
             
             Out: list of torch.nn.Modules
             """
-            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), nn.LeakyReLU(0.2, inplace=True), nn.Dropout2d(0.25)]
+            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), 
+                     nn.LeakyReLU(0.2), #inplace=True), 
+                     nn.Dropout2d(0.25)
+                    ]
             if bn:
                 block.append(nn.BatchNorm2d(out_filters, 0.8))
             return block

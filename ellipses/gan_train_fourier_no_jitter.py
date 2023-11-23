@@ -67,7 +67,7 @@ adversarial_loss_func = torch.nn.BCELoss()
 adversarial_loss_func.cuda()
 # set training parameters
 train_params = {
-    "num_epochs": 1000,
+    "num_epochs": 25,
     "batch_size": 100,
     "adversarial_loss_func": adversarial_loss_func,
     "save_path": [
@@ -79,8 +79,8 @@ train_params = {
     "save_epochs": 1,
     "optimizer_G": torch.optim.Adam,
     "optimizer_D": torch.optim.Adam,
-    "optimizer_G_params": {"lr": 1e-3, "eps": 1e-8, "weight_decay": 0},
-    "optimizer_D_params": {"lr": 1e-3, "eps": 1e-8, "weight_decay": 0},
+    "optimizer_G_params": {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0},
+    "optimizer_D_params": {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0},
     "scheduler_G": torch.optim.lr_scheduler.StepLR,
     "scheduler_D": torch.optim.lr_scheduler.StepLR,
     "scheduler_G_params": {"step_size": 100, "gamma": .98},
@@ -162,7 +162,7 @@ scheduler_D = train_params["scheduler_D"](optimizer_D, **train_params["scheduler
 # log setup
 import pandas as pd
 logging = pd.DataFrame(
-        columns=["generator_loss", "discriminator_loss", "lr_generator", "lr_discriminator"]
+        columns=["generator_loss", "discriminator_loss", "lr_generator", "lr_discriminator", "mem_alloc"]
 )
 # progressbar setup see training loop
 from tqdm import tqdm
@@ -193,23 +193,33 @@ for epoch in range(train_params["num_epochs"]):
         optimizer_G.zero_grad() 
         # draw random latent vector z
         latent_vector = torch.randn(images.shape[0], generator_params["latent_dim"]).to(device)
+        #latent_vector = torch.rand(images.shape[0], generator_params["latent_dim"]).to(device)
         generated_images = generator.forward(latent_vector).to(device)
         assert generated_images.shape == images.shape, "generated vector does not have the same shape as images - update your training parameters"
         discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-        generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.ones_like(discriminated_gen_imgs) )
-        generator_loss.backward()
+        # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
+        generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs) )
+        generator_loss.backward(retain_graph=True)
         optimizer_G.step()
         scheduler_G.step()
-
         # ----------------------------------------------------------
         # Train discriminator
         # ----------------------------------------------------------
         optimizer_D.zero_grad()
         # measure discriminator's ability to distinguish real from generated images
         discriminated_imgs = discriminator.forward(images)
-        real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs) )
-        fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs) )
+        generated_images = generator.forward(latent_vector).to(device)
+        discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
+        # equivalent with -log(D(x)), if BCE-loss
+        real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs))#, requires_grad=True) )
+        # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
+        fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs))#, requires_grad=True) )
+        # equivalent with -.5 * [ log( D(x) ) + log( 1 - D( G(z) ) ) ] 
         discriminator_loss = (real_loss + fake_loss)/2
+        #breakpoint()
+        discriminator_loss.backward()
+        optimizer_D.step()
+        scheduler_D.step()
         # append to log
         app_log = pd.DataFrame( 
             {
@@ -217,6 +227,7 @@ for epoch in range(train_params["num_epochs"]):
             "discriminator_loss" : discriminator_loss.item(), 
             "lr_generator"       : scheduler_G.get_last_lr()[0],
             "lr_discriminator"   : scheduler_D.get_last_lr()[0],
+            "mem_alloc"          : torch.cuda.memory_allocated(),
             }, 
             index = [0] )
         logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
@@ -228,7 +239,6 @@ for epoch in range(train_params["num_epochs"]):
             "discr_loss" : discriminator_loss.item(),
         }
         )
-        #breakpoint()
     
     #TODO: make evolution plot
     
@@ -240,19 +250,30 @@ for epoch in range(train_params["num_epochs"]):
 #        isave += 1
 #fig.savefig(os.getcwd() + "/GAN_evolution.png")
 
+# log plot
+fig, axs = plt.subplots(1,5, figsize = (25,5))
+axs[0].plot(logging["generator_loss"])
+axs[1].plot(logging["discriminator_loss"])
+axs[2].plot(logging["lr_generator"])
+axs[2].plot(logging["lr_discriminator"])
+axs[3].plot(logging["mem_alloc"])
+z = torch.randn(1, generator_params["latent_dim"]).to(device)
+generated_image = generator.forward(z).to("cpu").detach()
+axs[4].imshow(generated_image)
+fig.savefig(os.getcwd() + "/GAN_test_log.png")
 # save final reconstruction
 # TODO: get image and image reconstruction from complex vectors
 # TODO: make log-plot
-img, img_rec = get_img_rec(sample, noise, model = unet) 
-fig, axs = plt.subplots(1,5,figsize=(25,5) )
-plot_img = axs[0].imshow(img); plot_img_rec = axs[1].imshow(img_rec);
-plot_res = axs[2].imshow(torch.sqrt( (img - img_rec)**2) )
-fig.colorbar(plot_img, ax = axs[0]); fig.colorbar(plot_img_rec, ax=axs[1]); fig.colorbar(plot_res, ax=axs[2])
-axs[3].plot(torch.log(torch.tensor(logging["loss"])), label="log-loss", color="blue") 
-axs[4].plot(logging["lr"], label="learning rate", color="orange")
-fig.legend()
+#img, img_rec = get_img_rec(sample, noise, model = unet) 
+#fig, axs = plt.subplots(1,5,figsize=(25,5) )
+#plot_img = axs[0].imshow(img); plot_img_rec = axs[1].imshow(img_rec);
+#plot_res = axs[2].imshow(torch.sqrt( (img - img_rec)**2) )
+#fig.colorbar(plot_img, ax = axs[0]); fig.colorbar(plot_img_rec, ax=axs[1]); fig.colorbar(plot_res, ax=axs[2])
+#axs[3].plot(torch.log(torch.tensor(logging["loss"])), label="log-loss", color="blue") 
+#axs[4].plot(logging["lr"], label="learning rate", color="orange")
+#fig.legend()
 # savefig
-save_fn = "GAN.png"
-fig.savefig(os.getcwd() + "/" +  save_fn)
+#save_fn = "GAN.png"
+#fig.savefig(os.getcwd() + "/" +  save_fn)
 
-# TODO: implement optimization over latent vector z
+## TODO: implement optimization over latent vector z
