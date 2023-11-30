@@ -23,7 +23,7 @@ from operators import (
 
 
 # ----- load configuration -----
-import config  # isort:skip
+import config
 
 # ----- global configuration -----
 mpl.use("agg")
@@ -45,57 +45,20 @@ OpA = Fourier(mask)
 OpA_m.to(device)
 
 # ----- network configuration -----
-generator_params = {
-    "img_size"   : config.N,
-    "latent_dim" : 100,
-    # real and imag 
-    "channels"   : 2,
-}
-discriminator_params = {
-    "img_size" : config.N,
-    # real and imag 
-    "channels" : 2,
-}
+from config_gan import *
+from dataclasses import asdict
+generator_params = asdict(Generator_params())
+discriminator_params = asdict(Discriminator_params())
 
-# ------ definition of objective -------------- 
-#def adversarial_loss_func():
-#    pass
+# ------ Definition of objective -------------- 
 # Binary Cross Entropy between the target and the input probabilities
 # BCELoss(weight=None, size_average=None, reduce=None, reduction='mean')
 # doc : https://pytorch.org/docs/stable/generated/torch.nn.BCELoss.html
 adversarial_loss_func = torch.nn.BCELoss()
 adversarial_loss_func.cuda()
-# set training parameters
-train_params = {
-    "num_epochs": 25,
-    "batch_size": 100,
-    "adversarial_loss_func": adversarial_loss_func,
-    "save_path": [
-        os.path.join(
-            config.RESULTS_PATH,
-            "Fourier_UNet_it_no_jitter_DIP"
-        )
-    ],
-    "save_epochs": 1,
-    "optimizer_G": torch.optim.Adam,
-    "optimizer_D": torch.optim.Adam,
-    "optimizer_G_params": {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0},
-    "optimizer_D_params": {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0},
-    "scheduler_G": torch.optim.lr_scheduler.StepLR,
-    "scheduler_D": torch.optim.lr_scheduler.StepLR,
-    "scheduler_G_params": {"step_size": 100, "gamma": .98},
-    "scheduler_D_params": {"step_size": 100, "gamma": .98},
-    "acc_steps": 1,
-    "train_phases" : 2,
-    "train_transform": torchvision.transforms.Compose(
-        [ToComplex(), SimulateMeasurements(OpA)]
-    ),
-    "val_transform": torchvision.transforms.Compose(
-        [ToComplex(), SimulateMeasurements(OpA)],
-    ),
-    "train_loader_params": {"shuffle": True, "num_workers": 8},
-    "val_loader_params": {"shuffle": False, "num_workers": 8},
-}
+
+# Set training parameters
+train_params = asdict( GAN_train_params() )
 
 # ----- data configuration -----
 train_data_params = {
@@ -154,9 +117,9 @@ data_load_val = torch.utils.data.DataLoader(
 )
 
 # optimizer setup
-optimizer_G = train_params["optimizer_G"](generator.parameters(),     **train_params["optimizer_G_params"])
-optimizer_D = train_params["optimizer_D"](discriminator.parameters(), **train_params["optimizer_D_params"])
-scheduler_G = train_params["scheduler_G"](optimizer_G, **train_params["scheduler_G_params"])
+optimizer_G = train_params["optimizer_G"](generator.parameters(),     **train_params["optimizer_G_params"]) 
+optimizer_D = train_params["optimizer_D"](discriminator.parameters(), **train_params["optimizer_D_params"]) 
+scheduler_G = train_params["scheduler_G"](optimizer_G, **train_params["scheduler_G_params"]) 
 scheduler_D = train_params["scheduler_D"](optimizer_D, **train_params["scheduler_D_params"])
 
 # log setup
@@ -168,78 +131,31 @@ logging = pd.DataFrame(
 from tqdm import tqdm
 
 from matplotlib import pyplot as plt
-num_save_steps = 10
+num_save_steps = 5 
 save_each = torch.ceil( torch.tensor(train_params["num_epochs"] / num_save_steps) )
 save_epochs = torch.arange(train_params["num_epochs"])[::int(save_each)].tolist()
 fig, axs = plt.subplots(2,num_save_steps,figsize=(5*num_save_steps,5) )
 
-# TODO: training loop
-isave = 0
-for epoch in range(train_params["num_epochs"]): 
-    # make sure we are in train mode
-    generator.train()  
-    discriminator.train()
-    progress_bar = tqdm(
-        enumerate(data_load_train),
-        desc="Train GAN epoch %i"%epoch,
-        total=len(train_data)//train_params["batch_size"],
-    )
-    for i, batch in progress_bar: 
-        measurements, images = batch
-        measurments = measurements.to(device); images = images.to(device)
-        # -----------------------------------------------------------
-        # Train generator
-        # -----------------------------------------------------------
-        optimizer_G.zero_grad() 
-        # draw random latent vector z
-        latent_vector = torch.randn(images.shape[0], generator_params["latent_dim"]).to(device)
-        #latent_vector = torch.rand(images.shape[0], generator_params["latent_dim"]).to(device)
-        generated_images = generator.forward(latent_vector).to(device)
-        assert generated_images.shape == images.shape, "generated vector does not have the same shape as images - update your training parameters"
-        discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-        # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
-        generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs) )
-        generator_loss.backward(retain_graph=True)
-        optimizer_G.step()
-        scheduler_G.step()
-        # ----------------------------------------------------------
-        # Train discriminator
-        # ----------------------------------------------------------
-        optimizer_D.zero_grad()
-        # measure discriminator's ability to distinguish real from generated images
-        discriminated_imgs = discriminator.forward(images)
-        generated_images = generator.forward(latent_vector).to(device)
-        discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-        # equivalent with -log(D(x)), if BCE-loss
-        real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs))#, requires_grad=True) )
-        # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
-        fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs))#, requires_grad=True) )
-        # equivalent with -.5 * [ log( D(x) ) + log( 1 - D( G(z) ) ) ] 
-        discriminator_loss = (real_loss + fake_loss)/2
-        #breakpoint()
-        discriminator_loss.backward()
-        optimizer_D.step()
-        scheduler_D.step()
-        # append to log
-        app_log = pd.DataFrame( 
-            {
-            "generator_loss"     : generator_loss.item(), 
-            "discriminator_loss" : discriminator_loss.item(), 
-            "lr_generator"       : scheduler_G.get_last_lr()[0],
-            "lr_discriminator"   : scheduler_D.get_last_lr()[0],
-            "mem_alloc"          : torch.cuda.memory_allocated(),
-            }, 
-            index = [0] )
-        logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
-        
-        # update progress bar
-        progress_bar.update(1)
-        progress_bar.set_postfix(**{
-            "gen_loss"   : generator_loss.item(),
-            "discr_loss" : discriminator_loss.item(),
-        }
-        )
-    
+# load parameters
+generator.load_state_dict(torch.load(train_params["save_path"] + "/generator.pth") )
+discriminator.load_state_dict(torch.load(train_params["save_path"] + "/discriminator.pth") )
+from trainer_gan import *
+train_params["num_epoch"] = 100
+generator, discriminator, logging = train_loop_gan(
+    train_params          = train_params,
+    generator_params      = generator_params,
+    generator             = generator,
+    discriminator         = discriminator,
+    data_load_train       = data_load_train,
+    device                = device,
+    optimizer_G           = optimizer_G,
+    optimizer_D           = optimizer_D,
+    scheduler_G           = scheduler_G,
+    scheduler_D           = scheduler_D,
+    adversarial_loss_func = adversarial_loss_func,
+    logging               = logging,
+) 
+
     #TODO: make evolution plot
     
 #    if epoch in save_epochs:
@@ -251,15 +167,19 @@ for epoch in range(train_params["num_epochs"]):
 #fig.savefig(os.getcwd() + "/GAN_evolution.png")
 
 # log plot
-fig, axs = plt.subplots(1,5, figsize = (25,5))
-axs[0].plot(logging["generator_loss"])
-axs[1].plot(logging["discriminator_loss"])
-axs[2].plot(logging["lr_generator"])
-axs[2].plot(logging["lr_discriminator"])
-axs[3].plot(logging["mem_alloc"])
+fig, axs = plt.subplots(1,6, figsize = (25,5))
+axs[0].plot(logging["generator_loss"]); axs[0].set_title("Generator loss")
+axs[1].plot(logging["discriminator_loss"]); axs[1].set_title("Discriminator loss")
+axs[2].plot(logging["lr_generator"], label="Generator"); axs[2].set_title("Learning schedule")
+axs[2].plot(logging["lr_discriminator"], label="Discriminator"); axs[2].legend()
+axs[3].plot(logging["mem_alloc"]); axs[3].set_title("Memory consumption")
 z = torch.randn(1, generator_params["latent_dim"]).to(device)
 generated_image = generator.forward(z).to("cpu").detach()
-axs[4].imshow(generated_image)
+axs[4].imshow( (generated_image[0,0]**2 + generated_image[0,1]**2)**.5 )
+axs[4].set_title("Generated image")
+image = (data_load_train.dataset[0][1][0]**2 + data_load_train.dataset[0][1][1]**2)**.5 
+axs[5].imshow(image)
+axs[5].set_title("Example real image")
 fig.savefig(os.getcwd() + "/GAN_test_log.png")
 # save final reconstruction
 # TODO: get image and image reconstruction from complex vectors
