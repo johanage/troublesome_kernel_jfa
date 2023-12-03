@@ -39,7 +39,9 @@ mask_func = RadialMaskFunc(config.n, 40)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
+# Fourier matrix
 OpA_m = Fourier_m(mask)
+# Fourier operator
 OpA = Fourier(mask)
 inverter = LearnableInverterFourier(config.n, mask, learnable=False)
 # set device for operators
@@ -92,7 +94,8 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # Note that the second dimension consist of a 2-tuple
 # image x has shape (2, N, N), since x in C^{N x N}
 # measurement y has shape (2, m) since y in C^m
-sample = torch.load("/itf-fi-ml/home/johanfag/master/codebase/data/ellipses/test/sample_0.pt")
+# sample = torch.load("/itf-fi-ml/home/johanfag/master/codebase/data/ellipses/test/sample_0.pt")
+sample = torch.load("/uio/hume/student-u56/johanfag/master/codebase/data/ellipses/test/sample_0.pt")
 sample = sample[None].repeat(2,1,1)
 # set imaginary values to zero
 sample[1] = torch.zeros_like(sample[1])

@@ -39,7 +39,9 @@ mask_func = RadialMaskFunc(config.n, 40)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
+# Fourier matrix
 OpA_m = Fourier_m(mask)
+# Fourier operator
 OpA = Fourier(mask)
 # set device for operators
 OpA_m.to(device)
@@ -58,7 +60,9 @@ adversarial_loss_func = torch.nn.BCELoss()
 adversarial_loss_func.cuda()
 
 # Set training parameters
-train_params = asdict( GAN_train_params() )
+gan_train_params = GAN_train_params()
+gan_train_params.num_epochs = 0
+train_params = asdict( gan_train_params )
 
 # ----- data configuration -----
 train_data_params = {
@@ -128,19 +132,20 @@ logging = pd.DataFrame(
         columns=["generator_loss", "discriminator_loss", "lr_generator", "lr_discriminator", "mem_alloc"]
 )
 # progressbar setup see training loop
-from tqdm import tqdm
+#from tqdm import tqdm
 
-from matplotlib import pyplot as plt
-num_save_steps = 5 
-save_each = torch.ceil( torch.tensor(train_params["num_epochs"] / num_save_steps) )
-save_epochs = torch.arange(train_params["num_epochs"])[::int(save_each)].tolist()
-fig, axs = plt.subplots(2,num_save_steps,figsize=(5*num_save_steps,5) )
+#from matplotlib import pyplot as plt
+#num_save_steps = 5 
+#save_each = torch.ceil( torch.tensor(train_params["num_epochs"] / num_save_steps) )
+#save_epochs = torch.arange(train_params["num_epochs"])[::int(save_each)].tolist()
+#fig, axs = plt.subplots(2,num_save_steps,figsize=(5*num_save_steps,5) )
 
 # load parameters
-generator.load_state_dict(torch.load(train_params["save_path"] + "/generator.pth") )
-discriminator.load_state_dict(torch.load(train_params["save_path"] + "/discriminator.pth") )
+generator.load_state_dict(torch.load(train_params["save_path"] + "/generator_no_jitter_epoch90.pth") )
+discriminator.load_state_dict(torch.load(train_params["save_path"] + "/discriminator_no_jitter_epoch90.pth") )
+from importlib import reload
+import trainer_gan; reload(trainer_gan)
 from trainer_gan import *
-train_params["num_epoch"] = 100
 generator, discriminator, logging = train_loop_gan(
     train_params          = train_params,
     generator_params      = generator_params,
@@ -154,46 +159,32 @@ generator, discriminator, logging = train_loop_gan(
     scheduler_D           = scheduler_D,
     adversarial_loss_func = adversarial_loss_func,
     logging               = logging,
+    jitter                = False,
+    fn_suffix                = "_no_jitter"
 ) 
 
-    #TODO: make evolution plot
-    
-#    if epoch in save_epochs:
-#        img, img_rec = get_img_rec(sample, noise, model = unet)
-#        axs[0,isave].imshow(img_rec)
-#        axs[0,isave].set_title("Epoch %i"%epoch)
-#        axs[1,isave].imshow(.5*torch.log( (img - img_rec)**2))
-#        isave += 1
-#fig.savefig(os.getcwd() + "/GAN_evolution.png")
+# TODO: implement optimization over latent vector z
+# log z optimisation
+logging_zoptim = pd.DataFrame(
+        columns=["objective", "measurement_error", "representation_error", "lr", "mem_alloc"]
+)
 
-# log plot
-fig, axs = plt.subplots(1,6, figsize = (25,5))
-axs[0].plot(logging["generator_loss"]); axs[0].set_title("Generator loss")
-axs[1].plot(logging["discriminator_loss"]); axs[1].set_title("Discriminator loss")
-axs[2].plot(logging["lr_generator"], label="Generator"); axs[2].set_title("Learning schedule")
-axs[2].plot(logging["lr_discriminator"], label="Discriminator"); axs[2].legend()
-axs[3].plot(logging["mem_alloc"]); axs[3].set_title("Memory consumption")
-z = torch.randn(1, generator_params["latent_dim"]).to(device)
-generated_image = generator.forward(z).to("cpu").detach()
-axs[4].imshow( (generated_image[0,0]**2 + generated_image[0,1]**2)**.5 )
-axs[4].set_title("Generated image")
-image = (data_load_train.dataset[0][1][0]**2 + data_load_train.dataset[0][1][1]**2)**.5 
-axs[5].imshow(image)
-axs[5].set_title("Example real image")
-fig.savefig(os.getcwd() + "/GAN_test_log.png")
-# save final reconstruction
-# TODO: get image and image reconstruction from complex vectors
-# TODO: make log-plot
-#img, img_rec = get_img_rec(sample, noise, model = unet) 
-#fig, axs = plt.subplots(1,5,figsize=(25,5) )
-#plot_img = axs[0].imshow(img); plot_img_rec = axs[1].imshow(img_rec);
-#plot_res = axs[2].imshow(torch.sqrt( (img - img_rec)**2) )
-#fig.colorbar(plot_img, ax = axs[0]); fig.colorbar(plot_img_rec, ax=axs[1]); fig.colorbar(plot_res, ax=axs[2])
-#axs[3].plot(torch.log(torch.tensor(logging["loss"])), label="log-loss", color="blue") 
-#axs[4].plot(logging["lr"], label="learning rate", color="orange")
-#fig.legend()
-# savefig
-#save_fn = "GAN.png"
-#fig.savefig(os.getcwd() + "/" +  save_fn)
+# load CS train parameters
+cs_gan_train_params = asdict( CS_GAN_train_params() )
 
-## TODO: implement optimization over latent vector z
+# init generator input
+init_shape = (cs_gan_train_params["batch_size"], generator_params["latent_dim"])
+z_init = torch.randn(init_shape).to(device)
+
+# optimize generator input
+#breakpoint()
+z_optim, logging = optimize_generator_input_vector(
+    cs_train_params      = cs_gan_train_params,
+    z_init               = z_init,
+    generator            = generator,
+    data_load_train      = data_load_train,
+    measurement_operator = OpA,
+    logging              = logging_zoptim,
+    device               = device, 
+)
+
