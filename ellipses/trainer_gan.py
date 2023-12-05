@@ -1,5 +1,6 @@
 # loss functions and training loop(s)
 import torch; from torch import nn
+from torch.nn.utils import spectral_norm
 import pandas as pd
 from typing import Tuple, Union
 from networks import Generator, Discriminator
@@ -39,6 +40,8 @@ def train_loop_gan(
     # generalize to all loss function modules?
     adversarial_loss_func : nn.modules.loss.BCELoss,
     logging               : pd.DataFrame,
+    wgan                  : bool = False,
+    ncritic               : int = 10,
     save_epochs           : int = 10,
     jitter                : bool = True,
     mag_jitter            : float = 0.1,
@@ -57,161 +60,59 @@ def train_loop_gan(
         for i, batch in progress_bar:
             measurements, images = batch
             measurments = measurements.to(device); images = images.to(device)
+            # add random noise
             if jitter:
-                # add random gaussian noise
+                # gaussian noise
                 images += mag_jitter * torch.randn(images.shape).cuda()
-            # -----------------------------------------------------------
-            # Train generator
-            # -----------------------------------------------------------
-            optimizer_G.zero_grad()
+            
             # draw random latent vector z ~ N(0,I)
             latent_vector = torch.randn(images.shape[0], generator_params["latent_dim"]).to(device)
             #latent_vector = torch.rand(images.shape[0], generator_params["latent_dim"]).to(device)
-            generated_images = generator.forward(latent_vector).to(device)
-            assert generated_images.shape == images.shape, "generated vector does not have the same shape as images - update your training parameters"
-            discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-            # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
-            generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.ones_like(discriminated_gen_imgs) )
-            # equivalent with -log( D( G(z) ) ), if BCE-loss
-            #generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs) )
-            generator_loss.backward(retain_graph=True)
-            optimizer_G.step()
-            scheduler_G.step()
-            
+
             # ----------------------------------------------------------
             # Train discriminator
             # ----------------------------------------------------------
             optimizer_D.zero_grad()
             # measure discriminator's ability to distinguish real from generated images
-            discriminated_imgs = discriminator.forward(images)
-            generated_images = generator.forward(latent_vector).to(device)
+            discriminated_imgs = discriminator.forward(images).detach()
+            generated_images = generator.forward(latent_vector).to(device).detach()
+            assert generated_images.shape == images.shape, "generated vector does not have the same shape as images - update your training parameters"
             discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-            # equivalent with -log(D(x)), if BCE-loss
-            real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs))#, requires_grad=True) )
-            # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
-            fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs))#, requires_grad=True) )
-            # equivalent with -.5 * [ log( D(x) ) + log( 1 - D( G(z) ) ) ] 
-            discriminator_loss = (real_loss + fake_loss)/2
-            discriminator_loss.backward()
+            # TODO: implement WGAN discriminator loss
+            if wgan:
+                discriminator_loss = discriminated_imgs - discriminated_gen_imgs
+            else:
+                # equivalent with -log(D(x)), if BCE-loss
+                real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs))#, requires_grad=True) )
+                # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
+                fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs))#, requires_grad=True) )
+                # equivalent with -.5 * [ log( D(x) ) + log( 1 - D( G(z) ) ) ] 
+                discriminator_loss = (real_loss + fake_loss)/2
+            # backprop
+            discriminator_loss.backward(retain_graph=True)
             optimizer_D.step()
+            # update learning rate
             scheduler_D.step()
-            
-            # ----------------------------------------------------------
-            # LOGGING
-            # ----------------------------------------------------------
-            # append to log
-            app_log = pd.DataFrame(
-                {
-                "generator_loss"     : generator_loss.item(),
-                "discriminator_loss" : discriminator_loss.item(),
-                "lr_generator"       : scheduler_G.get_last_lr()[0],
-                "lr_discriminator"   : scheduler_D.get_last_lr()[0],
-                "mem_alloc"          : torch.cuda.memory_allocated(),
-                },
-                index = [0] )
-            logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
-
-            # update progress bar
-            progress_bar.update(1)
-            progress_bar.set_postfix(**{
-                "gen_loss"   : generator_loss.item(),
-                "discr_loss" : discriminator_loss.item(),
-            }
-            )
-            # save generator and discriminator weights every save_epochs epochs
-            if epoch % save_epochs == 0:
-                # ----------------- SAVE G and D parameters ------------------------------------
-                path = train_params["save_path"]
-                # save generator weights and biases
-                torch.save(generator.state_dict(), path + "/generator{suffix}_epoch{epoch}.pth".format(suffix = fn_suffix, epoch=epoch) )
-                # save discriminator weights and biases
-                torch.save(discriminator.state_dict(), path + "/discriminator{suffix}_epoch{epoch}.pth".format(suffix = fn_suffix, epoch=epoch))
-
-                # ----------------- Plot diagnostics --------------------------------------------
-                # image
-                image = (data_load_train.dataset[0][1][0]**2 + data_load_train.dataset[0][1][1]**2)**.5
-                # generate image
-                z = torch.randn(1, generator_params["latent_dim"]).to(device)
-                generated_image = generator.forward(z).to("cpu").detach()
-                # plot
-                plot_training_diagnostics(
-                    logging         = logging,
-                    image           = image,
-                    generated_image = generated_image,
-                )
-    return (generator, discriminator, logging,)
-
-
-def train_loop_wgan(
-    train_params          : dict,
-    generator_params      : dict,
-    generator             : Generator,
-    discriminator         : Discriminator,
-    data_load_train       : torch.utils.data.DataLoader,
-    device                : torch.device,
-    optimizer_G           : torch.optim.Adam,
-    optimizer_D           : torch.optim.Adam,
-    scheduler_G           : torch.optim.lr_scheduler.StepLR,
-    scheduler_D           : torch.optim.lr_scheduler.StepLR,
-    # generalize to all loss function modules?
-    adversarial_loss_func : nn.modules.loss.BCELoss,
-    logging               : pd.DataFrame,
-    save_epochs           : int = 10,
-    jitter                : bool = True,
-    mag_jitter            : float = 0.1,
-    fn_suffix             : str = ""
-) -> Tuple[nn.Module, nn.Module, pd.DataFrame]:
-
-    for epoch in range(train_params["num_epochs"]):
-        # make sure we are in train mode
-        generator.train()
-        discriminator.train()
-        progress_bar = tqdm(
-            enumerate(data_load_train),
-            desc="Train GAN epoch %i"%epoch,
-            total=len(data_load_train.dataset)//train_params["batch_size"],
-        )
-        for i, batch in progress_bar:
-            measurements, images = batch
-            measurments = measurements.to(device); images = images.to(device)
-            if jitter:
-                # add random gaussian noise
-                images += mag_jitter * torch.randn(images.shape).cuda()
+ 
             # -----------------------------------------------------------
             # Train generator
             # -----------------------------------------------------------
             optimizer_G.zero_grad()
-            # draw random latent vector z ~ N(0,I)
-            latent_vector = torch.randn(images.shape[0], generator_params["latent_dim"]).to(device)
-            generated_images = generator.forward(latent_vector).to(device)
-            assert generated_images.shape == images.shape, "generated vector does not have the same shape as images - update your training parameters"
-            discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-            # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
-            generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.ones_like(discriminated_gen_imgs) )
-            # equivalent with -log( D( G(z) ) ), if BCE-loss
-            #generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs) )
-            generator_loss.backward(retain_graph=True)
+            # reduntant or required to reset computational graph?
+            #generated_images = generator.forward(latent_vector).to(device)
+            #discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
+            # TODO : implement WGAN generator loss
+            if wgan:
+                generator_loss = -discriminated_gen_imgs 
+            else:
+                # GAN generator loss equivalent with -log( D( G(z) ) ), if BCE-loss
+                generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.ones_like(discriminated_gen_imgs) )        
+            # backprop
+            generator_loss.backward()
             optimizer_G.step()
-            scheduler_G.step()
+            # update learning rate
+            scheduler_G.step()           
             
-            # ----------------------------------------------------------
-            # Train discriminator
-            # ----------------------------------------------------------
-            optimizer_D.zero_grad()
-            # measure discriminator's ability to distinguish real from generated images
-            discriminated_imgs = discriminator.forward(images)
-            generated_images = generator.forward(latent_vector).to(device)
-            discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-            # equivalent with -log(D(x)), if BCE-loss
-            real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs))#, requires_grad=True) )
-            # equivalent with -log( 1 - D( G(z) ) ), if BCE-loss
-            fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs))#, requires_grad=True) )
-            # equivalent with -.5 * [ log( D(x) ) + log( 1 - D( G(z) ) ) ]
-            discriminator_loss = (real_loss + fake_loss)/2
-            discriminator_loss.backward()
-            optimizer_D.step()
-            scheduler_D.step()
-
             # ----------------------------------------------------------
             # LOGGING
             # ----------------------------------------------------------
@@ -256,8 +157,6 @@ def train_loop_wgan(
                     generated_image = generated_image,
                 )
     return (generator, discriminator, logging,)
-
-
 
 # --------------------------------------------------------------------------------
 #  Optimization of input
@@ -287,7 +186,7 @@ def objective_cs_gan(
     generator : Generator,
     OpA       : Fourier,
     regulate  : bool  = True,
-    lmbda     : float = 0.1,
+    lmbda     : float = 1e-3,
     p_reg     : Union[int, float] = 2,
     p_meas    : Union[int, float] = 2,
 ) -> float:
@@ -401,11 +300,12 @@ def optimize_generator_input_vector(
                 axs[0].plot(logging["measurement_error"], label="Measurement error")
                 axs[0].plot(logging["representation_error"], label="Representation error")
                 axs[1].plot(logging["lr"]); axs[1].set_title("Learning rate")
-                image_img = images[0].detach().cpu().swapaxes(0,2).swapaxes(0,1)
+                image_img = images[0].detach().cpu()
                 image = (image_img[0]**2 + image_img[1]**2)**.5
-                gen_image_img = G_z[0].detach().cpu().swapaxes(0,2).swapaxes(0,1)
+                gen_image_img = G_z[0].detach().cpu()
                 gen_image = (gen_image_img[0]**2 + gen_image_img[0]**2)**.5
-                axs[2].imshow(image); axs[2].set_title("Real image")
                 axs[2].imshow(gen_image); axs[2].set_title("Generated image")
+                axs[3].imshow(image); axs[2].set_title("Real image")
+                fig.savefig(os.getcwd() + "/z_optim_and_diagnostics.png")
 
     return (z, logging,)

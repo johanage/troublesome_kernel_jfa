@@ -582,7 +582,7 @@ class Generator(nn.Module):
         img = self.conv_blocks(out)
         return img
 
-
+from torch.nn.utils.parametrizations import spectral_norm
 class Discriminator(nn.Module):
     def __init__(
         self, 
@@ -610,7 +610,7 @@ class Discriminator(nn.Module):
             
             Out: list of torch.nn.Modules
             """
-            block = [nn.Conv2d(in_filters, out_filters, 3, 2, 1), 
+            block = [spectral_norm(nn.Conv2d(in_filters, out_filters, 3, 2, 1) ), 
                      nn.LeakyReLU(0.2), #inplace=True), 
                      nn.Dropout2d(0.25)
                     ]
@@ -619,7 +619,7 @@ class Discriminator(nn.Module):
             return block
 
         self.model = nn.Sequential(
-            *discriminator_block(channels, 16, bn=False),
+            *discriminator_block(channels, 16, bn=False),# name="kernel" ),
             *discriminator_block(16, 32),
             *discriminator_block(32, 64),
             *discriminator_block(64, 128),
@@ -627,7 +627,9 @@ class Discriminator(nn.Module):
 
         # The height and width of downsampled image
         ds_size = img_size // 2 ** 4
-        self.adv_layer = nn.Sequential(nn.Linear(128 * ds_size ** 2, 1), nn.Sigmoid())
+        self.adv_layer = nn.Sequential(
+            spectral_norm( nn.Linear(128 * ds_size ** 2, 1) ), 
+            nn.Sigmoid())
 
     def forward(self, 
         img : torch.Tensor,

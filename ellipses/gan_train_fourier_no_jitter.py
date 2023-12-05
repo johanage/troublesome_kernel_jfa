@@ -61,7 +61,7 @@ adversarial_loss_func.cuda()
 
 # Set training parameters
 gan_train_params = GAN_train_params()
-gan_train_params.num_epochs = 0
+gan_train_params.num_epochs = 20
 train_params = asdict( gan_train_params )
 
 # ----- data configuration -----
@@ -134,15 +134,9 @@ logging = pd.DataFrame(
 # progressbar setup see training loop
 #from tqdm import tqdm
 
-#from matplotlib import pyplot as plt
-#num_save_steps = 5 
-#save_each = torch.ceil( torch.tensor(train_params["num_epochs"] / num_save_steps) )
-#save_epochs = torch.arange(train_params["num_epochs"])[::int(save_each)].tolist()
-#fig, axs = plt.subplots(2,num_save_steps,figsize=(5*num_save_steps,5) )
-
 # load parameters
-generator.load_state_dict(torch.load(train_params["save_path"] + "/generator_no_jitter_epoch90.pth") )
-discriminator.load_state_dict(torch.load(train_params["save_path"] + "/discriminator_no_jitter_epoch90.pth") )
+#generator.load_state_dict(torch.load(train_params["save_path"] + "/generator_no_jitter_epoch90.pth") )
+#discriminator.load_state_dict(torch.load(train_params["save_path"] + "/discriminator_no_jitter_epoch90.pth") )
 from importlib import reload
 import trainer_gan; reload(trainer_gan)
 from trainer_gan import *
