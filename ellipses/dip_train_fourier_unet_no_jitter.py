@@ -11,6 +11,7 @@ import os
 import matplotlib as mpl
 import torch
 import torchvision
+from piq import psnr, ssim
 
 from data_management import IPDataset, SimulateMeasurements, ToComplex
 from networks import UNet
@@ -66,21 +67,22 @@ def loss_func(pred, tar):
     )
 
 # set training parameters
+num_epochs = 20000
 train_params = {
-    "num_epochs": 20000,
+    "num_epochs": num_epochs,
     "batch_size": 1,
     "loss_func": loss_func,
     "save_path": [
         os.path.join(
             config.RESULTS_PATH,
-            "Fourier_UNet_it_no_jitter_DIP"
+            "Fourier_UNet_no_jitter_DIP"
         )
     ],
-    "save_epochs": 1,
+    "save_epochs": num_epochs//10,
     "optimizer": torch.optim.Adam,
-    "optimizer_params": {"lr": 5e-4, "eps": 1e-8, "weight_decay": 0},
+    "optimizer_params": {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0},
     "scheduler": torch.optim.lr_scheduler.StepLR,
-    "scheduler_params": {"step_size": 100, "gamma": 0.97},
+    "scheduler_params": {"step_size": 100, "gamma": 1},
     "acc_steps": 1,
 }
 
@@ -98,25 +100,29 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 sample = torch.load("/uio/hume/student-u56/johanfag/master/codebase/data/ellipses/test/sample_0.pt")
 sample = sample[None].repeat(2,1,1)
 # set imaginary values to zero
-sample[1] = torch.zeros_like(sample[1])
+sample[1]   = torch.zeros_like(sample[1])
+# simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement.to(device)
-# init noise vector (as input to the model)
+# init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
 noise_mag = .1
-noise = noise_mag * torch.rand(sample.shape)
+# same shape as SR problem in Ulyanov et al 2018
+#noise     = noise_mag * torch.rand((32,) + tuple(sample.shape[1:]))
+# sampe shape as the image we want to reconstruct
+noise     = noise_mag * torch.rand(sample.shape)
 #noise[1] = torch.zeros_like(noise[1])
 noise = noise.to(device)
 
 # optimizer setup
-optimizer        = torch.optim.Adam
-scheduler        = torch.optim.lr_scheduler.StepLR
+optimizer = torch.optim.Adam
+scheduler = torch.optim.lr_scheduler.StepLR
 optimizer = optimizer(unet.parameters(), **train_params["optimizer_params"])
 scheduler = scheduler(optimizer, **train_params["scheduler_params"])
 
 # log setup
 import pandas as pd
 logging = pd.DataFrame(
-            columns=["loss", "lr"]
+    columns=["loss", "lr", "psnr", "ssim"]
 )
 # progressbar setup
 from tqdm import tqdm
@@ -125,20 +131,19 @@ progress_bar = tqdm(
     total=train_params["num_epochs"],
 )
 from matplotlib import pyplot as plt
-num_save_steps = 10
-save_each = torch.ceil( torch.tensor(train_params["num_epochs"] / num_save_steps) )
-save_epochs = torch.arange(train_params["num_epochs"])[::int(save_each)].tolist()# + [train_params["num_epochs"]-1]
-fig, axs = plt.subplots(2,num_save_steps,figsize=(5*num_save_steps,5) )
+num_save = train_params["num_epochs"] // train_params["save_epochs"]
+fig, axs = plt.subplots(2,num_save,figsize=(5*num_save,5) )
 
 # function that returns img of sample and the reconstructed image
 def get_img_rec(sample, noise, model):
     img = torch.sqrt(sample[0]**2 + sample[1]**2).to("cpu")
     reconstruction = model.forward(noise[None])
     img_rec = torch.sqrt(reconstruction[0,0]**2 + reconstruction[0,1]**2).detach().to("cpu")
-    return img, img_rec
+    return img, img_rec, reconstruction
 
 # training loop
 isave = 0
+# magnitude of added gaussian noise during training
 sigma_p = 1/30
 for epoch in range(train_params["num_epochs"]): 
     unet.train()  # make sure we are in train mode
@@ -146,15 +151,27 @@ for epoch in range(train_params["num_epochs"]):
     # add gaussian noise to noise input according to Ulyanov et al 2020
     additive_noise = sigma_p*torch.randn(noise.shape)
     model_input = noise + additive_noise.to(device)
+    # get img = Re(sample), img_rec = Re(pred_img), pred_img = G(z_tilde, theta)
+    img, img_rec, pred_img = get_img_rec(sample, model_input, model = unet)
     # pred = A G(z_tilde, theta)
-    pred = OpA( unet.forward(model_input[None]) )
+    pred = OpA(pred_img)
     loss = loss_func(pred, measurement[None])
     loss.backward()
     optimizer.step()
     scheduler.step()
     
+    # compute logging metrics, first prepare predicted image
+    ssim_pred = ssim( img[None,None], (img_rec/img_rec.max())[None,None] )
+    psnr_pred = psnr( img[None,None], (img_rec/img_rec.max())[None,None] )
     # append to log
-    app_log = pd.DataFrame( {"loss": loss.item(), "lr" : scheduler.get_last_lr()[0]}, index = [0] )
+    app_log = pd.DataFrame( 
+        {
+            "loss" : loss.item(), 
+            "lr"   : scheduler.get_last_lr()[0],
+            "psnr" : psnr_pred,
+            "ssim" : ssim_pred,
+        }, 
+        index = [0] )
     logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
     
     # update progress bar
@@ -162,25 +179,20 @@ for epoch in range(train_params["num_epochs"]):
     progress_bar.set_postfix(
         **unet._add_to_progress_bar({"loss": loss.item()})
     )
-    if epoch in save_epochs:
-        img, img_rec = get_img_rec(sample, noise, model = unet)
+    if epoch % train_params["save_epochs"] == 0:
         axs[0,isave].imshow(img_rec)
         axs[0,isave].set_title("Epoch %i"%epoch)
         axs[1,isave].imshow(.5*torch.log( (img - img_rec)**2))
         isave += 1
-fig.savefig(os.getcwd() + "/DIP_evolution.png")
+
+# TODO make figures presentable and functions where it is necessary
+fig.tight_layout()
+fig.savefig(os.getcwd() + "/DIP_evolution.png", bbox_inches="tight")
 
 # save final reconstruction
-#unet.eval()
-img, img_rec = get_img_rec(sample, noise, model = unet) 
-fig, axs = plt.subplots(1,5,figsize=(25,5) )
-plot_img = axs[0].imshow(img); plot_img_rec = axs[1].imshow(img_rec);
-plot_res = axs[2].imshow(torch.sqrt( (img - img_rec)**2) )
-fig.colorbar(plot_img, ax = axs[0]); fig.colorbar(plot_img_rec, ax=axs[1]); fig.colorbar(plot_res, ax=axs[2])
-axs[3].plot(torch.log(torch.tensor(logging["loss"])), label="log-loss", color="blue") 
-axs[4].plot(logging["lr"], label="learning rate", color="orange")
-fig.legend()
-# savefig
-save_fn = "DIP.png"
-fig.savefig(os.getcwd() + "/" +  save_fn)
-
+unet.eval()
+img, img_rec, rec = get_img_rec(sample, noise, model = unet) 
+# center and normalize to x_hat in [0,1]
+img_rec = (img_rec - img_rec.min() )/ (img_rec.max() - img_rec.min() )
+from eval_dip import plot_train_DIP
+plot_train_DIP(img, img_rec, logging)

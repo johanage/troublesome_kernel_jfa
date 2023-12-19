@@ -334,7 +334,7 @@ class UNet(InvNet):
             block_name="bottleneck",
             device = self.device,
         )
-
+        
         self.upconv4 = torch.nn.ConvTranspose2d(
             base_features * 16, base_features * 8, kernel_size=2, stride=2,
         )
@@ -402,29 +402,32 @@ class UNet(InvNet):
         bottleneck = self.bottleneck(self.pool4(enc4))
 
         dec4 = self.upconv4(bottleneck)
+        # add enc4
         dec4 = torch.cat((dec4, enc4), dim=1)
         dec4 = self.decoder4(dec4)
 
         dec3 = self.upconv3(dec4)
+        # add enc3
         dec3 = torch.cat((dec3, enc3), dim=1)
         dec3 = self.decoder3(dec3)
 
         dec2 = self.upconv2(dec3)
+        # add enc2
         dec2 = torch.cat((dec2, enc2), dim=1)
         dec2 = self.decoder2(dec2)
 
         dec1 = self.upconv1(dec2)
+        # add enc1
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-
         return self.outconv(dec1)
 
     @staticmethod
-    def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.2):
+    def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.1):
         if act_func == "leakyrelu":
             activation_function = torch.nn.LeakyReLU(negative_slope=negative_slope)#, inplace=True)
         if act_func == "relu":
-            acivation_function = torch.nn.ReLU()#inplace=True)
+            activation_function = torch.nn.ReLU()#inplace=True)
         block = torch.nn.Sequential(
             OrderedDict(
                 [

@@ -26,6 +26,82 @@ def plot_training_diagnostics(
     axs[5].set_title("Example real image")
     fig.savefig(os.getcwd() + "/GAN_test_log.png")
 
+
+def sn_discriminator_train_step(
+    discriminated_imgs     : torch.Tensor,
+    discriminated_gen_imgs : torch.Tensor,
+    generator_params       : dict,
+    discriminator          : nn.Module,
+    generator              : nn.Module,
+) -> Tuple[torch.tensor, torch.tensor]:
+    """
+    WGAN discriminator training step according to spectral gradient alg
+
+    """
+    # real loss
+    discriminator_loss_real = discriminated_imgs.mean()
+    # go in negative autograd direction
+    discriminator_loss_real.backward(torch.tensor(-1., dtype=torch.float) )
+    # fake loss
+    discriminator_loss_fake = discriminated_gen_imgs.mean()
+    # go in normal autograd direction
+    discriminator_loss_fake.backward(torch.tensor(1., dtype=torch.float) )
+    
+    return discriminator_loss_real, discriminator_loss_fake  
+
+def gp_discriminator_train_step(
+    images                   : torch.Tensor,
+    gen_images               : torch.Tensor,
+    generator_params         : dict,
+    discriminated_images     : torch.Tensor,
+    discriminated_gen_images : torch.Tensor,
+    discriminator            : nn.Module,
+    device                   : torch.device,
+    gp_coeff                 : float = 1e-4,
+) -> torch.Tensor:
+    """
+    Gradient penalty discriminator train step.
+
+    Computing the train step for the gradient penalty WGAN.
+    Following Alg. 1 from https://arxiv.org/pdf/1704.00028.pdf
+
+    Args:
+     - images                   : real images
+     - gen_images               : generated images from G(z)
+     - generator_params         : parameters of the generator network
+     - discriminated_image      : discriminator of real image
+     - discriminated_gen_images : discriminator of generated image
+     - discriminator            : discriminator model
+     - devivce                  : cpu or gpu
+     - gp_coeff                 : lambda, gradient penalty coefficient
+    
+    Out: 
+     - gp_loss                  : gradient penalty loss 
+    """
+    # step 4
+    epsilon       = torch.rand(1, dtype = torch.float).to(device)
+    # step 5 and 6, interpolation between real and fake image
+    x_hat = epsilon * images + (1 - epsilon) * gen_images
+    # to be able to get grad
+    x_hat.retain_grad()
+    # step 7 
+    # probabilites of x_hat being real
+    discriminated_x_hat = discriminator(x_hat)
+    # compute the gradients nabla_x_hat_D(x_hat)
+    grad_w_D_x_hat = torch.autograd.grad(
+        outputs = discriminated_x_hat,
+        inputs = x_hat,
+        grad_outputs = torch.ones_like(discriminated_x_hat, dtype=torch.float).to(device),
+        retain_graph = True,
+    )[0].view(images.shape[0], -1)
+    grad_w_D_x_hat = grad_w_D_x_hat.to(device)
+    # compute the gradient penalty wgan loss
+    gp_loss = discriminated_gen_images \
+            - discriminated_images \
+            + gp_coeff * (torch.sqrt( (grad_w_D_x_hat**2).sum(dim=1) + 1e-12 ) - 1)**2
+    return gp_loss
+
+
 def train_loop_gan(
     train_params          : dict,
     generator_params      : dict,
@@ -41,11 +117,12 @@ def train_loop_gan(
     adversarial_loss_func : nn.modules.loss.BCELoss,
     logging               : pd.DataFrame,
     wgan                  : bool = False,
-    ncritic               : int = 10,
+    ncritic               : int = 1,
     save_epochs           : int = 10,
     jitter                : bool = True,
     mag_jitter            : float = 0.1,
-    fn_suffix             : str = ""
+    fn_suffix             : str = "",
+    gp_coeff              : float = 1,
 ) -> Tuple[nn.Module, nn.Module, pd.DataFrame]:
     
     for epoch in range(train_params["num_epochs"]):
@@ -74,13 +151,41 @@ def train_loop_gan(
             # ----------------------------------------------------------
             optimizer_D.zero_grad()
             # measure discriminator's ability to distinguish real from generated images
-            discriminated_imgs = discriminator.forward(images).detach()
-            generated_images = generator.forward(latent_vector).to(device).detach()
+            discriminated_imgs = discriminator.forward(images)
+            generated_images = generator.forward(latent_vector).to(device)
             assert generated_images.shape == images.shape, "generated vector does not have the same shape as images - update your training parameters"
             discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
             # TODO: implement WGAN discriminator loss
             if wgan:
-                discriminator_loss = discriminated_imgs - discriminated_gen_imgs
+                """
+                # real loss
+                discriminator_loss_real = discriminated_imgs.mean()
+                # go in negative autograd direction
+                discriminator_loss_real.backward(torch.tensor(-1., dtype=torch.float) )
+                # fake loss
+                discriminator_loss_fake = discriminated_gen_imgs.mean()
+                # go in normal autograd direction
+                discriminator_loss_fake.backward(torch.tensor(1., dtype=torch.float) )
+                #
+                sn_discriminator_train_step(
+                    discriminated_imgs     = discriminated_images,
+                    discriminated_gen_imgs = discriminated_gen_imgs,
+                    generator_params       = generator_params,
+                    discriminator          = discriminator,
+                    generator              = generator,
+                )
+                """
+                gp_loss = gp_discriminator_train_step(
+                    images                   = images,
+                    gen_images               = generated_images,
+                    generator_params         = generator_params,
+                    discriminated_images     = discriminated_imgs,
+                    discriminated_gen_images = discriminated_gen_imgs,
+                    discriminator            = discriminator,
+                    device                   = device,
+                    gp_coeff                 = gp_coeff,
+                )
+                gp_loss.mean().backward( torch.tensor(1., dtype=torch.float) )
             else:
                 # equivalent with -log(D(x)), if BCE-loss
                 real_loss = adversarial_loss_func( discriminated_imgs, torch.ones_like(discriminated_imgs))#, requires_grad=True) )
@@ -88,8 +193,9 @@ def train_loop_gan(
                 fake_loss = adversarial_loss_func( discriminated_gen_imgs, torch.zeros_like(discriminated_gen_imgs))#, requires_grad=True) )
                 # equivalent with -.5 * [ log( D(x) ) + log( 1 - D( G(z) ) ) ] 
                 discriminator_loss = (real_loss + fake_loss)/2
-            # backprop
-            discriminator_loss.backward(retain_graph=True)
+                # backprop
+                discriminator_loss.backward(retain_graph=True)
+            # update weights of discriminator
             optimizer_D.step()
             # update learning rate
             scheduler_D.step()
@@ -97,33 +203,42 @@ def train_loop_gan(
             # -----------------------------------------------------------
             # Train generator
             # -----------------------------------------------------------
-            optimizer_G.zero_grad()
-            # reduntant or required to reset computational graph?
-            #generated_images = generator.forward(latent_vector).to(device)
-            #discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
-            # TODO : implement WGAN generator loss
-            if wgan:
-                generator_loss = -discriminated_gen_imgs 
-            else:
-                # GAN generator loss equivalent with -log( D( G(z) ) ), if BCE-loss
-                generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.ones_like(discriminated_gen_imgs) )        
-            # backprop
-            generator_loss.backward()
-            optimizer_G.step()
-            # update learning rate
-            scheduler_G.step()           
-            
+            if i % ncritic == 0:
+                optimizer_G.zero_grad()
+                # generate new images for generator 
+                latent_vector = torch.randn(images.shape[0], generator_params["latent_dim"]).to(device)
+                generated_images = generator.forward(latent_vector).to(device)
+                discriminated_gen_imgs = discriminator.forward(generated_images).to(device)
+                # TODO : implement WGAN generator loss
+                if wgan:
+                    generator_loss = discriminated_gen_imgs.mean() 
+                    # autograd in negative direction
+                    generator_loss.backward(torch.tensor(-1., dtype=torch.float))
+                else:
+                    # GAN generator loss equivalent with -log( D( G(z) ) ), if BCE-loss
+                    generator_loss = adversarial_loss_func(discriminated_gen_imgs, torch.ones_like(discriminated_gen_imgs) )        
+                    # backprop
+                    generator_loss.backward()
+                # update weights of generator
+                optimizer_G.step()
+                # update learning rate
+                scheduler_G.step()           
+                
             # ----------------------------------------------------------
             # LOGGING
             # ----------------------------------------------------------
             # append to log
+            #wgan_loss = discriminator_loss_real.item() - discriminator_loss_fake.item()
+            wgan_loss = gp_loss.mean().item()
             app_log = pd.DataFrame(
                 {
-                "generator_loss"     : generator_loss.item(),
-                "discriminator_loss" : discriminator_loss.item(),
-                "lr_generator"       : scheduler_G.get_last_lr()[0],
-                "lr_discriminator"   : scheduler_D.get_last_lr()[0],
-                "mem_alloc"          : torch.cuda.memory_allocated(),
+                "generator_loss"          : generator_loss.item(),
+                #"discriminator_loss_real" : discriminator_loss_real.item(),
+                #"discriminator_loss_fake" : discriminator_loss_fake.item(),
+                "discriminator_loss"      : wgan_loss,
+                "lr_generator"            : scheduler_G.get_last_lr()[0],
+                "lr_discriminator"        : scheduler_D.get_last_lr()[0],
+                "mem_alloc"               : torch.cuda.memory_allocated(),
                 },
                 index = [0] )
             logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
@@ -132,7 +247,7 @@ def train_loop_gan(
             progress_bar.update(1)
             progress_bar.set_postfix(**{
                 "gen_loss"   : generator_loss.item(),
-                "discr_loss" : discriminator_loss.item(),
+                "discr_loss" : wgan_loss,
             }
             )
             # save generator and discriminator weights every save_epochs epochs

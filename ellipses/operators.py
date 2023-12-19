@@ -69,6 +69,184 @@ class RadialMaskFunc(object):
         # return binary mask
         return torch.tensor(out > 0)
 
+from torchvision.io import read_image
+import os
+class MaskFromFile(object):
+    """     
+    Reads mask from file. Most of the sampling patterns are generated using
+    Antun et al.'s Cilib library : https://github.com/vegarant/cilib/
+
+    Parameters
+    ----------
+    path     : path to directory of sampling pattern
+    filename : filename of sampling pattern
+    
+    A tuple specifying the size of the mask.
+    """
+    def __init__(
+        self, 
+        path     : str,
+        filename : str,
+    ) -> None:
+        self.path = path
+        self.filename = filename
+        # image should be in uint8 with values in [0, 1, ....,255]
+        # shape (C, N, N)
+        image = read_image(path + filename)
+        self.mask = torch.tensor(image.clone().detach() > 0) 
+        print('self.mask.shape: ', self.mask.shape)
+
+    def __call__(self, shape, seed=None):
+        assert (self.mask.shape[0] == shape[-3]) and (
+            self.mask.shape[1] == shape[-2]
+        )
+        return torch.reshape(
+            self.mask, (len(shape) - 3) * (1,) + self.shape + (1,)
+        )
+    
+    def _plot_mask(saveto : str): #TODO
+        pass
+
+from typing import Callable
+def bisection(
+    f       : Callable, 
+    xl      : float, 
+    xh      : float,
+    eps     : float = 1e-8,
+    max_itr : int   = 150,
+) -> int:
+    """
+    Bisection method, see intermediate value theorem.
+    Approximates root for |f(m)|<= eps, with m the midpoint.
+    Args:
+     - f       : function to perform the bisection method on
+     - xl      : low domain value
+     - xh      : high domain value
+     - eps     : tolerance of root
+     - max_itr : max number of iterations
+    """  
+    fl = f(xl);
+    fh = f(xh);
+    m = (xl + xh)/2
+    fm = f(m);
+    
+    # check if low abs function value is lower than lower bound
+    if abs(fl) < eps:
+        m = xl;
+        fm = 0;
+
+    # check if abs high function value is lower than lower bound
+    if abs(fh) < eps:
+        m = xh;
+        fm = 0;
+    
+    if fl*fh > 0:
+        assert fl*fh <= 0, 'Bisection method failed: fl = %d, fh = %d\n'%(fl, fh)
+    
+    i = 1;
+    for i in range(1, max_itr):
+        if abs(fm) >= eps:
+            break
+        # set midpoint
+        m = (xh+xl)/2;
+        # compute function value at midpoint
+        fm = f(m);
+        if fm*fl < 0:
+            xh = m;
+        else:
+            xl = m;
+            fl = fm;
+
+class MultilevelGaussMaskFunc(object):
+    """ 
+    Creates a multi-level sampling pattern where each sampling level has the 
+    shape indicated by shapef. 
+    
+    INPUT
+    N        - Size of image is N x N 
+    nsamples - Number of samples
+    shapef   - Function handle shape(x,y,scale), telling whether or not the
+               coordinates x and y is contained in the scale. 
+    a        - Decay parameter
+    r0       - Fully sample the r_0 first levels
+    nlevels  - Number of sampling levels (we denote the quantity by 'r').
+    
+    Suppose the sets B_k, k=1,2,...,r is a partition of [1,2,...,N]^2. This
+    function strives to find local sampling densities p_k = m_k / |B_k|, 
+    such that p_k = 1 for k=1,...,r0 and
+    
+    p_k = exp( -(b(k-r_0)/(r-r0))^a )      for k = r_0+1,...,r.
+    
+    This is achived by adjusting b, so that m_1 + m_2 + ... + m_r = nsamples.
+    Sometimes we are not able to find such a b, then the function fails.
+    
+    OUTPUT:
+    idx   - Sampling pattern, given in an linear ordering. That is indices in the range
+            1,2, ..., N*N.
+    str_id - String identifyer, describing which type of sampling pattern this is.  
+    
+    Vegard Antun, 2017.    
+    """
+
+    def __init__(
+        self, 
+        N        : int,
+        nsamples : int, 
+        a        : int, 
+        r0       : int,
+        nlevels  : int,
+    )-> None:
+        self.N = N
+        self.shape = (N,N)
+        self.nsamples = nsamples
+        self.r0 = r0
+        self.a  = a,
+        self.mask = self._generate_radial_mask(N, nsamples, a, r0, nlevelse)
+        print('self.mask.shape: ', self.mask.shape)
+    
+    def __call__(self, shape, seed=None):
+        assert (self.mask.shape[0] == shape[-3]) and (
+            self.mask.shape[1] == shape[-2]
+        )
+        return torch.reshape(
+            self.mask, (len(shape) - 3) * (1,) + self.shape + (1,)
+        )
+
+    def _generate_radial_mask(
+        self, 
+        N        : int,
+        nsamples : int,
+        a        : int,
+        r0       : int,
+        nlevels  : int,
+    ) -> torch.Tensor:
+        # generate line template and empty mask
+        x, y = N, N
+        d = math.ceil(np.sqrt(2) * max(x, y))
+        mask = np.zeros((d, d))
+        scales = torch.round( torch.arange(1, nlevels + 1,nlevels) * N / nlevels ).type(torch.int)
+        level_idx = torch.zeros(nlevels)
+        level_idx[r0:] = torch.arange(nlevels - r0)
+        bin_sizes = None # TODO : cil_compute_bin_sizes(N, shapef, scales)
+        def prob_level(
+            x : float,
+            level_idx : torch.Tensor = level_idx,
+            nlevels : int = nlevels,
+            r0      : int = r0,
+            a       : int = a,
+            bin_sizes : torch.Tensor = bin_sizes,
+            nsamples : int = nsamples,
+        ) -> float:
+            pk = torch.round(torch.exp( - ( b * level_idx / (n - r0)**a )*bin_sizes ) )
+            return pk.sum() - nsamples
+        # find root of prob_level by bisection method
+        root = bisection(prob_level, 1e-5, 2000)
+        # compute the number of samples per level
+        level_size = torch.round(torch.exp( - ( b * level_idx / (n - r0)**a )*bin_sizes ) )
+        mask = cil_sp_from_shape(N, shapef, scales, level_size)
+        if len(mask) <= nsamples: print("Did not generate enough samples, but using %i samples"%(len(mask)) )
+        # return binary mask
+        return torch.tensor(mask > 0)
 
 def l2_error(X, X_ref, relative=False, squared=False, use_magnitude=True):
     """ Compute average l2-error of an image over last three dimensions.

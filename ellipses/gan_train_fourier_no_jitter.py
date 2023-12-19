@@ -153,8 +153,11 @@ generator, discriminator, logging = train_loop_gan(
     scheduler_D           = scheduler_D,
     adversarial_loss_func = adversarial_loss_func,
     logging               = logging,
+    wgan                  = True,
+    ncritic               = 5,
     jitter                = False,
-    fn_suffix                = "_no_jitter"
+    fn_suffix             = "_wgan_no_jitter",
+    gp_coeff              = 10,
 ) 
 
 # TODO: implement optimization over latent vector z

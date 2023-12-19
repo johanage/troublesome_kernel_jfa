@@ -43,7 +43,7 @@ OpA = Fourier(mask)
 # Set optimizer parameters
 @dataclass
 class Optimizer_params:
-    lr           : float = 1e-3
+    lr           : float = 1e-4
     eps          : float = 1e-8
     weight_decay : float = 0
     
