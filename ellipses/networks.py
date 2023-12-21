@@ -4,6 +4,7 @@ from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable as mal
 import pandas as pd
 import torch
 
@@ -130,6 +131,7 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
                 os.path.join(save_path, "plot_epoch{:03d}.png".format(epoch + 1)),
                 bbox_inches="tight",
             )
+            del fig
 
         return logging
 
@@ -172,6 +174,8 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         val_transform=None,
         train_loader_params={"shuffle": True},
         val_loader_params={"shuffle": False},
+        plot_evolution = True,
+        fn_evolution = None,
     ):
         optimizer = optimizer(self.parameters(), **optimizer_params)
         scheduler = scheduler(optimizer, **scheduler_params)
@@ -199,7 +203,10 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         logging = pd.DataFrame(
             columns=["loss", "val_loss", "rel_l2_error", "val_rel_l2_error"]
         )
-
+        if plot_evolution:
+            fig_evo, axs_evo = plt.subplots(2,10,figsize=(50,10) )
+            isave = 0
+            [ax.set_axis_off() for ax in axs_evo.flatten()]
         for epoch in range(num_epochs):
             self.train()  # make sure we are in train mode
             t = tqdm(
@@ -218,7 +225,7 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
                 )
                 with torch.no_grad():
                     loss += loss_b
-            loss /= i + 1
+                    loss /= i + 1
 
             with torch.no_grad():
                 self.eval()  # make sure we are in eval mode
@@ -230,7 +237,8 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
                     )
                     v_loss += v_loss_b
                 v_loss /= i + 1
-
+                
+                # logging
                 logging = self._on_epoch_end(
                     epoch,
                     save_epochs,
@@ -246,7 +254,6 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
                     v_pred,
                     val_data,
                 )
-
         self._on_train_end(save_path, logging)
         return logging
 
@@ -471,27 +478,27 @@ class UNet(InvNet):
         def _implot(sub, im):
             if im.shape[-3] == 2:  # complex image
                 p = sub.imshow(
-                    torch.sqrt(im.pow(2).sum(-3))[0, :, :].detach().cpu()
+                    torch.sqrt(im.pow(2).sum(-3))[0, :, :].detach().cpu(),
+                    cmap = "Greys_r",                    
                 )
             else:  # real image
                 p = sub.imshow(im[0, 0, :, :].detach().cpu())
             return p
 
-        fig, subs = plt.subplots(2, 3, clear=True, num=1, figsize=(8, 6))
+        fig, subs = plt.subplots(2, 3, clear=True, num=1, figsize=(15, 10))
 
         # inv = self.inverter(inp)
         v_inv = self.inverter(v_inp)
 
         # training and validation loss
-        subs[0, 0].set_title("losses")
+        subs[0, 0].set_title("Losses")
         subs[0, 0].semilogy(logging["loss"], label="train")
         subs[0, 0].semilogy(logging["val_loss"], label="val")
         subs[0, 0].legend()
-
+   
         # validation input
         p10 = _implot(subs[1, 0], v_inv)
         subs[1, 0].set_title("val inv")
-        plt.colorbar(p10, ax=subs[1, 0])
 
         # validation output
         p01 = _implot(subs[0, 1], v_pred)
@@ -499,17 +506,14 @@ class UNet(InvNet):
             "val output:\n ||x0-xrec||_2 / ||x0||_2 \n = "
             "{:1.2e}".format(logging["val_rel_l2_error"].iloc[-1])
         )
-        plt.colorbar(p01, ax=subs[0, 1])
 
         # validation target
         p11 = _implot(subs[1, 1], v_tar)
         subs[1, 1].set_title("val target")
-        plt.colorbar(p11, ax=subs[1, 1])
 
         # validation difference
         p12 = _implot(subs[1, 2], v_pred - v_tar)
         subs[1, 2].set_title("val diff: x0 - x_pred")
-        plt.colorbar(p12, ax=subs[1, 2])
 
         # training output
         p02 = _implot(subs[0, 2], pred)
@@ -517,8 +521,10 @@ class UNet(InvNet):
             "train output:\n ||x0-xrec||_2 / ||x0||_2 \n = "
             "{:1.2e}".format(logging["rel_l2_error"].iloc[-1])
         )
-        plt.colorbar(p02, ax=subs[0, 2])
-
+        for ax,plot in zip([subs[1,0], subs[0,1], subs[1,1], subs[1,2], subs[0,2]],[p10, p01, p11, p12, p02]):
+            divider = mal(ax)
+            cax     = divider.append_axes("right", size="5%", pad = 0.05)
+            fig.colorbar(plot, cax=cax)
         return fig
 
 from torch import nn

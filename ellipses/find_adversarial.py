@@ -22,18 +22,17 @@ def normalized_atanh(x, eps=1e-6):
 
 
 # ----- Optimization Methods -----
-
-
+from typing import Callable, Optional, Tuple, List, Union
 def PGD(
-    loss,
-    t_in,
-    projs=None,
-    iter=50,
-    stepsize=1e-2,
-    maxls=50,
-    ls_fac=0.1,
-    ls_severity=1.0,
-    silent=False,
+    loss        : Callable,
+    t_in        : torch.Tensor,
+    projs       : Union[List[Callable], Tuple[Callable]]=None,
+    iter        : int   = 50,
+    stepsize    : float = 1e-2,
+    maxls       : int   = 50,
+    ls_fac      : float = 0.1,
+    ls_severity : float = 1.0,
+    silent      : bool  = False,
 ):
     """ (Proj.) gradient decent with simple constraints.
 
@@ -99,7 +98,7 @@ def PGD(
         pre_loss = loss(t_in)
         pre_loss.backward()
         p = -t_in.grad.data
-        # backtracking line search
+        # backtracking line search : https://en.wikipedia.org/wiki/Backtracking_line_search
         ls_count, STOP_LS = 1, False
         with torch.no_grad():
             while not STOP_LS:

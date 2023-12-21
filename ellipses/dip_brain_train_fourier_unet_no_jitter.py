@@ -15,9 +15,9 @@ from piq import psnr, ssim
 
 from data_management import IPDataset, SimulateMeasurements, ToComplex
 from networks import UNet
-from operators import Fourier as Fourier
-from operators import Fourier_matrix as Fourier_m
 from operators import (
+    Fourier,
+    Fourier_matrix as Fourier_m,
     LearnableInverterFourier,
     RadialMaskFunc,
     MaskFromFile,
@@ -75,6 +75,7 @@ def loss_func(pred, tar):
 
 # set training parameters
 num_epochs = 30000
+init_lr = 5e-4
 train_params = {
     "num_epochs": num_epochs,
     "batch_size": 1,
@@ -82,7 +83,7 @@ train_params = {
     "save_path": os.path.join(config.RESULTS_PATH,"Fourier_UNet_no_jitter_DIP"),
     "save_epochs": num_epochs//10,
     "optimizer": torch.optim.Adam,
-    "optimizer_params": {"lr": 5e-4, "eps": 1e-8, "weight_decay": 0},
+    "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
     "scheduler": torch.optim.lr_scheduler.StepLR,
     "scheduler_params": {"step_size": num_epochs//100, "gamma": 0.96},
     "acc_steps": 1,
@@ -186,15 +187,14 @@ for epoch in range(train_params["num_epochs"]):
         **unet._add_to_progress_bar({"loss": loss.item()})
     )
     if epoch % train_params["save_epochs"] == 0:
+        print("Saving parameters of models and plotting evolution")
         ###### Save parameters of DIP model
         path = train_params["save_path"]
-        # save generator weights and biases
         fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}".format(
-            lr = 5e-4, 
+            lr = init_lr, 
             gamma = train_params["scheduler_params"]["gamma"],
             sampling_pattern = "circ_sr2.5e-1",
         )
-        breakpoint()
         torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_epoch{epoch}.pth".format(suffix = fn_suffix, epoch=epoch) )
         
         ###### Plot evolution of training process #######

@@ -7,7 +7,8 @@ N = 256;
 #ROOT = "/itf-fi-ml/home/johanfag"
 ROOT = "/uio/hume/student-u56/johanfag"
 #DATA_PATH = os.path.join(ROOT + "/master/codebase/data/ellipses")
-DATA_PATH = os.path.join(ROOT + "/master/codebase/data/ellipses")
+#DATA_PATH = os.path.join(ROOT + "/master/codebase/data/ellipses")
+DATA_PATH = os.path.join(ROOT + "/master/codebase/data/pytorch_datasets/fastMRI")
 RESULTS_PATH = os.path.join(f"models")
 
 # ----- random seeds -----

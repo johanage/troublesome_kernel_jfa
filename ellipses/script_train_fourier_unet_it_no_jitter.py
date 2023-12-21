@@ -19,6 +19,7 @@ from operators import Fourier_matrix as Fourier_m
 from operators import (
     LearnableInverterFourier,
     RadialMaskFunc,
+    MaskFromFile,
 )
 
 
@@ -39,9 +40,19 @@ mask_func = RadialMaskFunc(config.n, 40)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
-OpA_m = Fourier_m(mask)
-OpA = Fourier(mask)
-inverter = LearnableInverterFourier(config.n, mask, learnable=False)
+mask_fromfile = MaskFromFile(
+    path = os.getcwd() + "/sampling_patterns/",
+    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
+)
+# Fourier matrix
+#OpA_m = Fourier_m(mask)
+OpA_m = Fourier_m(mask_fromfile.mask[None])
+# Fourier operator
+#OpA = Fourier(mask)
+OpA = Fourier(mask_fromfile.mask[None])
+# init learnable inversion operator
+#inverter = LearnableInverterFourier(config.n, mask, learnable=False)
+inverter = LearnableInverterFourier(config.n, mask_fromfile.mask[None], learnable=False)
 # set device for operators
 OpA_m.to(device)
 inverter.to(device)
@@ -59,7 +70,6 @@ unet = UNet
 # ----- training configuration -----
 mseloss = torch.nn.MSELoss(reduction="sum")
 
-
 def loss_func(pred, tar):
     return (
         mseloss(pred, tar) / pred.shape[0]
@@ -68,13 +78,14 @@ def loss_func(pred, tar):
 
 train_phases = 2
 train_params = {
-    "num_epochs": [35, 6],
+    "num_epochs": [100, 10],
     "batch_size": [10, 10],
     "loss_func": loss_func,
     "save_path": [
         os.path.join(
             config.RESULTS_PATH,
-            "Fourier_UNet_it_no_jitter_"
+            #"Fourier_UNet_it_no_jitter_"
+            "circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256"
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
@@ -99,7 +110,6 @@ train_params = {
 }
 
 # ----- data configuration -----
-
 train_data_params = {
     "path": config.DATA_PATH,
 }
@@ -127,10 +137,16 @@ with open(
 
 # ------ construct network and train -----
 unet = unet(**unet_params)
-param_dir = "/itf-fi-ml/home/johanfag/master/codebase/troublesome_kernel_jfa/ellipses/models/Fourier_UNet_it_no_jitter_train_phase_1/"
+
+# start from previously trained network
+"""
+root = ""
+param_dir = "/models/Fourier_UNet_it_no_jitter_train_phase_1/"
 file_param = "model_weights_epoch23.pt"
-params_loaded = torch.load(param_dir + file_param)
+params_loaded = torch.load(root + param_dir + file_param)
 unet.load_state_dict(params_loaded)
+"""
+
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
@@ -141,7 +157,6 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # measurement y has shape (2, m) since y in C^m
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
-breakpoint()
 # run training 
 for i in range(train_phases):
     train_params_cur = {}
@@ -149,7 +164,11 @@ for i in range(train_phases):
         train_params_cur[key] = (
             value[i] if isinstance(value, (tuple, list)) else value
         )
-    breakpoint() 
+    if i == 0:
+        train_params_cur["fn_evolution"] = "sr_0.5_brain256_evolution"
+        train_params_cur["plot_evolution"] = True
+    else:
+         train_params_cur["plot_evolution"] = False
     print("Phase {}:".format(i + 1))
     for key, value in train_params_cur.items():
         print(key + ": " + str(value))
