@@ -34,7 +34,7 @@ def PGD(
     ls_severity : float = 1.0,
     silent      : bool  = False,
 ):
-    """ (Proj.) gradient decent with simple constraints.
+    """ (Proj.) gradient descent with simple constraints.
 
     Minimizes a given loss function subject to optional constraints. The
     constraints must be "simple" in the sense that efficient projections onto
@@ -90,6 +90,11 @@ def PGD(
     ls_stepsize = stepsize
     t = tqdm(range(iter), desc="PGD iter", disable=silent)
     for it in t:
+        """
+        For each iteration the stepsize is initialised to stepsize of GD but
+        an optimized stepsize is computed using a backtracking line search
+        that decreases the stepsize until the Armijo-Goldstein condition is met.
+        """
         # reset gradients
         if t_in.grad is not None:
             t_in.grad.detach_()
@@ -102,6 +107,13 @@ def PGD(
         ls_count, STOP_LS = 1, False
         with torch.no_grad():
             while not STOP_LS:
+                # P(delta_i-1 + lambda * nabla_delta l(Psi_theta(y + delta_i-1), x)
+                # P - projection operator found in _project
+                # delta_i-1 - adversarial noise at iteration i-1
+                # lambda - learning rate, in backtracking LS it's the stepsize ls_stepsize
+                #  note that ls_stepsize is set initially to the GD stepsize
+                # nabla_delta l(Psi_theta(y + delta_i-1), x) - gradient of loss wrt. adversarial noise of 
+                #  reconstruction of perturbed image Psi_theta(y + delta_i-1) and ground truth image x
                 t_tmp = _project(t_in + ls_stepsize * p)
                 step_loss = loss(t_tmp)
                 STOP_LS = (ls_count >= maxls) or (
@@ -124,7 +136,7 @@ def PGD(
         # allow initial step size guess to grow between iterations
         if ls_count < maxls and maxls > 1:
             ls_stepsize /= ls_fac
-        # stop if steps become to small
+        # stop if steps become too small
         if ls_stepsize < 1e-18:
             break
 
@@ -169,6 +181,7 @@ def PAdam(
         with torch.no_grad():
             t_tmp = t_in.clone()
             if projs is not None:
+                # apply chain of projections
                 for proj in projs:
                     t_tmp = proj(t_tmp)
                 t_in.data = t_tmp.data
@@ -241,10 +254,10 @@ def untargeted_attack(
         The distance measure between f(x) and f(reference) in the codomain of
         f. (Default torch.nn.MSELoss)
     weights : tuple of float
-        Weighting factor for the two distance measures in the objective.
-        (Default (1.0, 1.0))
+        Weighting factor for the distance measures in the objective.
+        (Default (1.0, 1.0, 1.0))
     optimizer : callable, optional
-        The routine used for solving th optimization problem. (Default `PGD`)
+        The routine used for solving the optimization problem. (Default `PGD`)
     transform : callable, optional
         Domain variable transform. (Default `identity`)
     inverse_transform : callable, optional
@@ -363,7 +376,6 @@ def grid_attack(
         )
 
     for idx_noise in reversed(range(len(noise_rel))):
-
         # perform the actual attack for "method" and current noise level
         print(
             "Method: "

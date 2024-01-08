@@ -1,4 +1,5 @@
 import os
+from typing import Tuple, Union, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -192,8 +193,22 @@ def _reconstructNet(y, noise_rel, net):
 
 # attack function for any net
 
-def _attackerNet(x0, noise_rel, net, yadv_init=None, batch_size=3):
-
+def _attackerNet(
+    x0         : torch.Tensor, 
+    noise_rel  : float,
+    net        : torch.nn.Module, 
+    yadv_init  : torch.Tensor = None, 
+    batch_size : int = 3
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    -----------------------------------------------------------
+    Attacker function for any DNN
+    -----------------------------------------------------------
+    x0        : ground truth image
+    noise_rel : noise level relative to the ground truth image
+    net       : DNN to use
+    yadv_init : initial adversarial measurements
+    """
     # compute noiseless measurements
     y0 = OpA(x0)
 
@@ -262,7 +277,7 @@ def _load_net(path, subnet, subnet_params, it_net_params):
     it_net.eval()
     return it_net
 
-
+# methods dataframe append function for each net configuration
 def _append_net(name, info, net):
     methods.loc[name] = {
         "info": info,
@@ -276,7 +291,6 @@ def _append_net(name, info, net):
 
 
 # ----- UNets -----
-
 unet_params = {
     "in_channels": 2,
     "drop_factor": 0.0,

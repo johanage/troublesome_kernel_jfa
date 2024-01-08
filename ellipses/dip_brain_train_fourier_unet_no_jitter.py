@@ -6,7 +6,7 @@ Terms
 """
 
 
-import h5py, os
+import os
 
 import matplotlib as mpl
 import torch
@@ -80,7 +80,7 @@ train_params = {
     "num_epochs": num_epochs,
     "batch_size": 1,
     "loss_func": loss_func,
-    "save_path": os.path.join(config.RESULTS_PATH,"Fourier_UNet_no_jitter_DIP"),
+    "save_path": os.path.join(config.RESULTS_PATH,"DIP"),
     "save_epochs": num_epochs//10,
     "optimizer": torch.optim.Adam,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
@@ -186,7 +186,7 @@ for epoch in range(train_params["num_epochs"]):
     progress_bar.set_postfix(
         **unet._add_to_progress_bar({"loss": loss.item()})
     )
-    if epoch % train_params["save_epochs"] == 0:
+    if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
         print("Saving parameters of models and plotting evolution")
         ###### Save parameters of DIP model
         path = train_params["save_path"]
@@ -195,8 +195,10 @@ for epoch in range(train_params["num_epochs"]):
             gamma = train_params["scheduler_params"]["gamma"],
             sampling_pattern = "circ_sr2.5e-1",
         )
-        torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_epoch{epoch}.pth".format(suffix = fn_suffix, epoch=epoch) )
-        
+        if epoch < train_params["num_epochs"] - 1:
+            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_epoch{epoch}.pth".format(suffix = fn_suffix, epoch=epoch) )
+        else:
+            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_last.pth".format(suffix = fn_suffix) )
         ###### Plot evolution of training process #######
         cmap = "Greys_r"
         axs[0,isave].imshow(img_rec, cmap=cmap)

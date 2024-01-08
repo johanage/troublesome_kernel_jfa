@@ -1,6 +1,7 @@
 """
-DESCRIPTION OF WHAT THIS SCRIPT DOES
-------------------------------------
+Training script for supervised learning using a UNet.
+UNet is implemented in networks.py.
+-----------------------------------------------------
 Terms
     - jitter, means that noise, typically Gaussian, is added to the data while training to reduce overfit
 """
