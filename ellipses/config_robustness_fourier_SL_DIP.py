@@ -3,8 +3,9 @@
 # - Deep image prior - serving as untrained network/ unsupervised method
 
 import os
-
+from typing import Tuple
 import matplotlib as mpl
+import pandas as pd
 import torch
 import torchvision
 from piq import psnr, ssim
@@ -104,14 +105,14 @@ def _attackerNet(
     # attack parameters
     adv_init_fac = 3.0 * noise_level
     adv_param = {
-        "codomain_dist": _complexloss,
-        "domain_dist": None,
-        "mixed_dist": None,
-        "weights": (1.0, 1.0, 1.0),
-        "optimizer": PAdam,
-        "projs": None,
-        "iter": 1000,
-        "stepsize": 5e0,
+        "codomain_dist" : _complexloss,
+        "domain_dist"   : None,
+        "mixed_dist"    : None,
+        "weights"       : (1.0, 1.0, 1.0),
+        "optimizer"     : PAdam,
+        "projs"         : None,
+        "iter"          : 1000,
+        "stepsize"      : 5e0,
     }
     # compute initialization
     yadv = y0.clone().detach() + (
@@ -153,7 +154,7 @@ def _attackerNet(
 def _load_net(
     path       : str, 
     net        : torch.nn.Module, 
-    net_params : dict
+    net_params : dict,
 ) -> torch.nn.Module:
     """
     Loads the parameter values of net with parameters net_params from path.
@@ -166,11 +167,13 @@ def _load_net(
     Out:
     - Network with parameters given by state dict loaded from path.
     """
-    net_init = net(**net_params).to(device)
-    net_loaded = net_init.load_state_dict(torch.load(path, map_location=torch.device(device)))
-    net_loaded.freeze()
-    net_loaded.eval()
-    return net_loaded
+    network = net(**net_params).to(device)
+    network.load_state_dict(torch.load(path, map_location=torch.device(device)))
+    # net_loaded.freeze()
+    for parameter in network.parameters():
+        parameter.requires_grad = False
+    network.eval()
+    return network
 
 # methods dataframe append function for each net configuration
 def _append_net(
@@ -219,8 +222,35 @@ _append_net(
     },
     _load_net(
         f"{config.RESULTS_PATH}/DIP/"
-        + "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pth",
+        + "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt",
         UNet,
         dip_unet_params,
+    ),
+)
+
+# ----- DIP UNet configuration -----
+supervised_unet_params = {
+    "in_channels"   : 2,
+    "drop_factor"   : 0.0,
+    "base_features" : 32,
+    "out_channels"  : 2,
+    "operator"      : OpA_m,
+    "inverter"      : inverter,
+}
+_append_net(
+    "Supervised UNet no jit",
+    {
+        "name_disp": "Supervised UNet w/o noise",
+        "name_save": "unet_no_jit",
+        "plt_color": "#023eff",
+        "plt_marker": "x",
+        "plt_linestyle": "--",
+        "plt_linewidth": 2.75,
+    },
+    _load_net(
+        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+        + "model_weights.pt",
+        UNet,
+        supervised_unet_params,
     ),
 )

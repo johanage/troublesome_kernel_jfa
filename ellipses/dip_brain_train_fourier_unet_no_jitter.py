@@ -196,16 +196,17 @@ for epoch in range(train_params["num_epochs"]):
             sampling_pattern = "circ_sr2.5e-1",
         )
         if epoch < train_params["num_epochs"] - 1:
-            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_epoch{epoch}.pth".format(suffix = fn_suffix, epoch=epoch) )
+            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) )
+            ###### Plot evolution of training process #######
+            cmap = "Greys_r"
+            axs[0,isave].imshow(img_rec, cmap=cmap)
+            #axs[0,isave].set_title("Epoch %i"%epoch)
+            axs[1,isave].imshow(.5*torch.log( (img - img_rec)**2), cmap=cmap)
+            axs[0,isave].set_axis_off(); axs[1,isave].set_axis_off()
+            isave += 1       
         else:
-            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_last.pth".format(suffix = fn_suffix) )
-        ###### Plot evolution of training process #######
-        cmap = "Greys_r"
-        axs[0,isave].imshow(img_rec, cmap=cmap)
-        #axs[0,isave].set_title("Epoch %i"%epoch)
-        axs[1,isave].imshow(.5*torch.log( (img - img_rec)**2), cmap=cmap)
-        axs[0,isave].set_axis_off(); axs[1,isave].set_axis_off()
-        isave += 1
+            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_last.pt".format(suffix = fn_suffix) )
+        
 
 # TODO make figures presentable and functions where it is necessary
 fig.tight_layout()
