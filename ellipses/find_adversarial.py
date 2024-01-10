@@ -1,8 +1,7 @@
 import torch
-
 from tqdm import tqdm
-
 from operators import l2_error
+from typing import Callable, Optional, Tuple, List, Union, Type
 
 
 # ----- Variable Transforms -----
@@ -22,11 +21,10 @@ def normalized_atanh(x, eps=1e-6):
 
 
 # ----- Optimization Methods -----
-from typing import Callable, Optional, Tuple, List, Union
 def PGD(
     loss        : Callable,
     t_in        : torch.Tensor,
-    projs       : Union[List[Callable], Tuple[Callable]]=None,
+    projs       : Union[List[Callable], Tuple[Callable]] = None,
     iter        : int   = 50,
     stepsize    : float = 1e-2,
     maxls       : int   = 50,
@@ -144,7 +142,12 @@ def PGD(
 
 
 def PAdam(
-    loss, t_in, projs=None, iter=50, stepsize=1e-2, silent=False,
+    loss     : Callable, 
+    t_in     : torch.Tensor, 
+    projs    : Union[List[Callable], Tuple[Callable]] = None, 
+    iter     : int = 50, 
+    stepsize : float = 1e-2, 
+    silent   : bool =False,
 ):
     """ (Proj.) Adam accelerated gradient decent with simple constraints.
 
@@ -206,22 +209,127 @@ def PAdam(
 
     return t_in
 
+from functools import partial
+def PAdamn_DIP(
+    loss         : Callable,
+    # should be equivalent to issubclass(type(net), torch.nn.Module)
+    net          : Type[torch.nn.Module],
+    train_params : dict,
+    z_tilde      : torch.Tensor,
+    y0           : torch.Tensor,
+    t_in         : torch.Tensor, 
+    projs        : Union[List[Callable], Tuple[Callable]] = None, 
+    iter         : int      = 50, 
+    stepsize     : float    = 1e-2, 
+    silent       : bool     = False,
+) -> torhc.Tensor:
+    """ (Proj.) Adam accelerated gradient decent with simple constraints.
+
+    Minimizes a given loss function subject to optional constraints. The
+    constraints must be "simple" in the sense that efficient projections onto
+    the feasible set exist.
+
+    Parameters
+    ----------
+    loss : callable
+        The loss or objective function. z_tilde should be given outside since this is a static argument.
+        The net parameters theta will be updated during the optimization process so this is a dynamic argument.
+    net  : torch.nn.Module 
+        The reconstruction network.
+    train_params: dict
+        Training parameters containing e.g. DIP net optimizer.
+    y0   : torch.Tensor
+        Noiseless measurement.
+    z_tilde : torch.Tensor
+        The fixed random input tensor. Form Ulyanov et al. 2017 z_tilde ~ U([0,1/10]).
+    t_in : torch.Tensor
+        The input tensor representing the adv. noise. This will be modified during
+        optimization. The provided tensor serves as initial guess for the
+        iterative optimization algorithm and will hold the result in the end.
+    projs : list or tuple of callables, optional
+        The projections onto the feasible set to perform after each gradient
+        descent step. They will be performed in the order given. (Default None)
+    iter : int, optional
+        Number of iterations. (Default 50)
+    stepsize : float, optional
+        The step size parameter for gradient descent. (Default 1e-2)
+    silent : bool, optional
+        Disable progress bar. (Default False)
+
+    Returns
+    -------
+    torch.tensor
+        The modified input t_in. Note that t_in is changed as a
+        side-effect, even if the returned tensor is discarded.
+    """
+
+    def _project(t_in):
+        with torch.no_grad():
+            t_tmp = t_in.clone()
+            if projs is not None:
+                # apply chain of projections
+                for proj in projs:
+                    t_tmp = proj(t_tmp)
+                t_in.data = t_tmp.data
+            return t_tmp
+
+    # run optimization
+    optimizer = torch.optim.Adam((t_in,), lr=stepsize, eps=1e-5)
+    t = tqdm(range(iter), desc="PAdam iter", disable=silent)
+    # setup for dip net training
+    dip_optimizer = train_params["optimizer"]
+    for it in t:
+        # ------------- DIP training step ------------------------------
+        net.train()
+        # reset gradients
+        dip_optimizer.zero_grad()
+        # update the net parameters minimizing the DIP loss function
+        dip_loss = loss(net(z_tilde), y0 + t_in)
+        dip_loss.backward()
+        # update dip net parameter
+        dip_optimizer.step()
+        
+        # ------------- Adv. noise PGD step ------------------------------
+        # make sure only adv. noise is updatet in this step
+        # turn of training mode in specific layers, fex. dropout
+        net.eval()
+        # fix parameters in dip net
+        for param in net.parameters():
+            param.requires_grad = False
+        # reset gradients of adv. noise tensor
+        if t_in.grad is not None:
+            t_in.grad.detach_()
+            t_in.grad.zero_()
+        # make partial loss with the frozen net
+
+        #  compute loss and take gradient step
+        # pre loss is loss before projection onto lp-ball
+        pre_loss = loss(t_in)
+        pre_loss.backward()
+        optimizer.step()
+        # project and evaluate
+        _project(t_in)
+        # post loss is loss after projection onto lp-ball
+        post_loss = loss(t_in)
+        t.set_postfix(pre_loss=pre_loss.item(), post_loss=post_loss.item())
+    return t_in
+
 
 # ----- Adversarial Example Finding -----
 
 
 def untargeted_attack(
-    func,
-    t_in_adv,
-    t_in_ref,
-    t_out_ref=None,
-    domain_dist=None,
-    mixed_dist=None,
-    codomain_dist=torch.nn.MSELoss(),
-    weights=(1.0, 1.0, 1.0),
-    optimizer=PGD,
-    transform=identity,
-    inverse_transform=identity,
+    func              : Callable,
+    t_in_adv          : torch.Tensor,
+    t_in_ref          : torch.Tensor,
+    t_out_ref         : torch.Tensor = None,
+    domain_dist       : Callable     = None,
+    mixed_dist        : Callable     = None,
+    codomain_dist     : Callable     = torch.nn.MSELoss(),
+    weights           : Tuple        = (1.0, 1.0, 1.0),
+    optimizer         : Callable     = PGD,
+    transform         : Callable = identity,
+    inverse_transform : Callable = identity,
     **kwargs
 ):
     """ Untargeted finding of adversarial examples.

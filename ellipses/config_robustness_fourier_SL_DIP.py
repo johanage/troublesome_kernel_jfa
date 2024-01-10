@@ -5,9 +5,7 @@
 import os
 from typing import Tuple
 import matplotlib as mpl
-import pandas as pd
-import torch
-import torchvision
+import pandas as pd, torch, torchvision, numpy as np
 from piq import psnr, ssim
 
 from data_management import IPDataset, SimulateMeasurements, ToComplex
@@ -19,8 +17,14 @@ from operators import (
     RadialMaskFunc,
     MaskFromFile,
     noise_gaussian,
+    proj_l2_ball,
 )
-
+from find_adversarial import (
+    PGD,
+    PAdam,
+    untargeted_attack,
+    grid_attack,
+)
 
 # ----- load data configuration -----
 import config  # isort:skip
@@ -59,8 +63,15 @@ noise_ref = noise_gaussian
 
 # ----- set up net attacks --------
 
+# loss
+mseloss = torch.nn.MSELoss(reduction="sum")
+def _complexloss(reference, prediction):
+    loss = mseloss(reference, prediction)
+    return loss
+
 # the actual reconstruction method for any net
-def _reconstructNet(y, noise_rel, net):
+#def _reconstructNet(y, noise_rel, net):
+def _reconstructNet(y, net):
     return net.forward(y)
 
 # attack function for any net
@@ -118,7 +129,7 @@ def _attackerNet(
     yadv = y0.clone().detach() + (
         adv_init_fac / np.sqrt(np.prod(y0.shape[-2:]))
     ) * torch.randn_like(y0)
-
+    # set init adversarial meas example if previous lower noise level was computed
     if yadv_init is not None:
         yadv[0 : yadv_init.shape[0], ...] = yadv_init.clone().detach()
 
@@ -127,22 +138,26 @@ def _attackerNet(
             "Attack for samples "
             + str(list(range(idx_batch, idx_batch + batch_size)))
         )
-
+        y0_batch = y0[idx_batch : idx_batch + batch_size, ...]
+        # set l2-ball projection
+        # - centered at y0[idx_batch : idx_batch + batch_size, ...]
+        # - with radius given by noise_level[idx_batch : idx_batch + batch_size, ...]
         adv_param["projs"] = [
             lambda y: proj_l2_ball(
                 y,
-                y0[idx_batch : idx_batch + batch_size, ...],
+                #y0[idx_batch : idx_batch + batch_size, ...],
+                y0_batch,
                 noise_level[idx_batch : idx_batch + batch_size, ...],
             )
         ]
-        # perform attack
+        # perform untargeted attack
         yadv[idx_batch : idx_batch + batch_size, ...] = untargeted_attack(
-            lambda y: _reconstructNet(y, 0.0, net),
-            yadv[idx_batch : idx_batch + batch_size, ...]
-            .clone()
-            .requires_grad_(True),
-            y0[idx_batch : idx_batch + batch_size, ...],
-            t_out_ref=x0[idx_batch : idx_batch + batch_size, ...],
+            #lambda y: _reconstructNet(y, 0.0, net),
+            func      = lambda y: _reconstructNet(y, net),
+            t_in_adv  = yadv[idx_batch : idx_batch + batch_size, ...].clone().requires_grad_(True),
+            #t_in_ref  = y0[idx_batch : idx_batch + batch_size, ...],
+            t_in_ref  = y0_batch,
+            t_out_ref = x0[idx_batch : idx_batch + batch_size, ...],
             **adv_param
         ).detach()
 
@@ -193,7 +208,8 @@ def _append_net(
     """
     methods.loc[name] = {
         "info": info,
-        "reconstr": lambda y, noise_rel: _reconstructNet(y, noise_rel, net),
+        #"reconstr": lambda y, noise_rel: _reconstructNet(y, noise_rel, net),
+        "reconstr": lambda y, noise_rel: _reconstructNet(y, net),
         "attacker": lambda x0, noise_rel, yadv_init=None: _attackerNet(
             x0, noise_rel, net, yadv_init=yadv_init
         ),
@@ -201,6 +217,9 @@ def _append_net(
     }
 
 # ----- DIP UNet configuration -----
+
+
+
 dip_unet_params = {
     "in_channels"   : 2,
     "drop_factor"   : 0.0,

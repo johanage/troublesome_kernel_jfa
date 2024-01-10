@@ -93,7 +93,7 @@ class MaskFromFile(object):
         # image should be in uint8 with values in [0, 1, ....,255]
         # shape (C, N, N)
         image = read_image(path + filename)
-        self.mask = torch.tensor(image.clone().detach() > 0) 
+        self.mask = image.clone().detach() > 0 
         print('self.mask.shape: ', self.mask.shape)
 
     def __call__(self, shape, seed=None):

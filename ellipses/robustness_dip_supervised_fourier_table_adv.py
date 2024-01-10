@@ -14,9 +14,9 @@ from operators import to_complex
 
 
 # ----- load configuration -----
-import config  # isort:skip
-import config_robustness_fourier_SL_DIP as cfg_rob  # isort:skip
-from config_robustness_fourier_SL_DIP import methods  # isort:skip
+import config  
+import config_robustness_fourier_SL_DIP as cfg_rob  
+methods = cfg_rob.methods
 
 # ------ general setup ----------
 
@@ -45,7 +45,7 @@ err_measure = err_measure_l2
 
 # select reconstruction methods
 methods_include = [
-    "DIP UNet jit",
+    #"DIP UNet jit",
     "Supervised UNet no jit",
     #'L1',
     #"UNet it no jit",
@@ -124,7 +124,9 @@ for (idx, method) in methods.iterrows():
             Y_0_s = Y_0[s : s + 1, ...].repeat(
                 it_init, *((Y_0.ndim - 1) * (1,))
             )
-
+            # noise_rel - noise levels
+            # X_0_s     - images batch
+            # Y_0_s     - measurement batch
             (
                 X_adv_err_cur,
                 X_ref_err_cur,
@@ -141,12 +143,12 @@ for (idx, method) in methods.iterrows():
                 keep_init=keep_init,
                 err_measure=err_measure,
             )
-
+            # store max current adversarial error
             (
                 results.loc[idx].X_adv_err[:, s],
                 idx_max_adv_err,
             ) = X_adv_err_cur.max(dim=1)
-            
+            # store current mean of reference error
             results.loc[idx].X_ref_err[:, s] = X_ref_err_cur.mean(dim=1)
 
 
@@ -212,28 +214,28 @@ if do_plot:
     fig, ax = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
 
     for (idx, method) in methods.loc[methods_plot].iterrows():
-        #print(f'idx: {idx}, method: {method}, res: {results.loc[idx].X_adv_err}')
-        breakpoint()
-        err_mean = results.loc[idx].X_adv_err[:, :].mean(dim=-1)
-        err_std = results.loc[idx].X_adv_err[:, :].std(dim=-1)
-
-        plt.plot(
-            noise_rel,
-            err_mean,
-            linestyle=method.info["plt_linestyle"],
-            linewidth=method.info["plt_linewidth"],
-            marker=method.info["plt_marker"],
-            color=method.info["plt_color"],
-            label=method.info["name_disp"],
-        )
-        if idx == "L1" or idx == "UNet it jit mod" or idx == "UNet it jit" or idx == "UNet it no jit":
-            plt.fill_between(
+        if idx in methods_plot:
+            print(f'idx: {idx}, method: {method}, res: {results.loc[idx].X_adv_err}')
+            err_mean = results.loc[idx].X_adv_err[:, :].mean(dim=-1)
+            err_std = results.loc[idx].X_adv_err[:, :].std(dim=-1)
+            breakpoint() 
+            plt.plot(
                 noise_rel,
-                err_mean + err_std,
-                err_mean - err_std,
-                alpha=0.10,
-                color=method.info["plt_color"],
+                err_mean,
+                linestyle = method["info"]["plt_linestyle"],
+                linewidth = method["info"]["plt_linewidth"],
+                marker    = method["info"]["plt_marker"],
+                color     = method["info"]["plt_color"],
+                label     = method["info"]["name_disp"],
             )
+            if idx == "L1" or idx == "UNet it jit mod" or idx == "UNet it jit" or idx == "UNet it no jit":
+                plt.fill_between(
+                    noise_rel,
+                    err_mean + err_std,
+                    err_mean - err_std,
+                    alpha = 0.10,
+                    color = method["info"]["plt_color"],
+                )
 
     plt.yticks(np.arange(0, 1, step=0.05))
     plt.ylim((-0.01, 0.36))
