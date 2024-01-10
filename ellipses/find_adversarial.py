@@ -210,19 +210,19 @@ def PAdam(
     return t_in
 
 from functools import partial
-def PAdamn_DIP(
+def PAdam_DIP(
     loss         : Callable,
     # should be equivalent to issubclass(type(net), torch.nn.Module)
     net          : Type[torch.nn.Module],
-    train_params : dict,
-    z_tilde      : torch.Tensor,
-    y0           : torch.Tensor,
+    dip_optimizer: Type[torch.optim.Optimizer],
+    #z_tilde      : torch.Tensor,
+    #y0           : torch.Tensor,
     t_in         : torch.Tensor, 
     projs        : Union[List[Callable], Tuple[Callable]] = None, 
     iter         : int      = 50, 
     stepsize     : float    = 1e-2, 
     silent       : bool     = False,
-) -> torhc.Tensor:
+) -> torch.Tensor:
     """ (Proj.) Adam accelerated gradient decent with simple constraints.
 
     Minimizes a given loss function subject to optional constraints. The
@@ -276,16 +276,14 @@ def PAdamn_DIP(
     # run optimization
     optimizer = torch.optim.Adam((t_in,), lr=stepsize, eps=1e-5)
     t = tqdm(range(iter), desc="PAdam iter", disable=silent)
-    # setup for dip net training
-    dip_optimizer = train_params["optimizer"]
     for it in t:
         # ------------- DIP training step ------------------------------
         net.train()
         # reset gradients
         dip_optimizer.zero_grad()
         # update the net parameters minimizing the DIP loss function
-        dip_loss = loss(net(z_tilde), y0 + t_in)
-        dip_loss.backward()
+        dip_loss = loss(t_in, net)
+        dip_loss.backward()
         # update dip net parameter
         dip_optimizer.step()
         
@@ -301,16 +299,16 @@ def PAdamn_DIP(
             t_in.grad.detach_()
             t_in.grad.zero_()
         # make partial loss with the frozen net
-
+        loss_adv_noise = partial(loss, net = net)
         #  compute loss and take gradient step
         # pre loss is loss before projection onto lp-ball
-        pre_loss = loss(t_in)
+        pre_loss = loss_adv_noise(t_in)
         pre_loss.backward()
         optimizer.step()
         # project and evaluate
         _project(t_in)
         # post loss is loss after projection onto lp-ball
-        post_loss = loss(t_in)
+        post_loss = loss_adv_noise(t_in)
         t.set_postfix(pre_loss=pre_loss.item(), post_loss=post_loss.item())
     return t_in
 

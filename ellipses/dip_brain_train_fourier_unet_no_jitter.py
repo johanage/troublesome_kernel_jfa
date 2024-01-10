@@ -98,7 +98,7 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
 dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 sample = torch.load(dir_train + "sample_00000.pt")
-# make fake imaginary part
+# sample is real valued so make fake imaginary part
 sample = sample[None].repeat(2,1,1)
 # set imaginary values to zero
 sample[1]   = torch.zeros_like(sample[1])
