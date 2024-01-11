@@ -78,9 +78,20 @@ v_tar = torch.load(dir_val + "sample_00000.pt").to(device)
 v_tar_complex = to_complex(v_tar[None]).to(device)
 measurement = OpA(v_tar_complex).to(device)[None]
 
+# init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
+noise_mag = .1
+# same shape as SR problem in Ulyanov et al 2018
+z_tilde = noise_mag * torch.rand((unet_params["in_channels"],) + v_tar.shape)
+z_tilde = z_tilde.to(device)[None]
+
+# optimizer setup
+dip_optimizer = torch.optim.Adam
+dip_optimizer = dip_optimizer(unet.parameters(), **train_params["optimizer_params"])
+
 # load model weights
-file_param = "model_weights.pt"
-params_loaded = torch.load(param_dir_phase2 + file_param)
+param_dir = os.getcwd() + "/models/DIP/"
+file_param = "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
+params_loaded = torch.load(param_dir + file_param)
 unet.load_state_dict(params_loaded)
 unet.eval()
 from find_adversarial import PAdam_DIP
@@ -88,9 +99,8 @@ from functools import partial
 from operators import proj_l2_ball
 # define loss function
 # x - target image, y - measurements, net - DL model, adv_noise - adversarial noise
-loss_adv = lambda adv_noise,x,y,net: (net(y + adv_noise) - x).pow(2).pow(.5).sum()
-loss_adv_partial = partial(loss_adv, x = v_tar, y = measurement, net = unet)
-
+loss_adv = lambda adv_noise, net,z_tilde,y, meas_op: ( meas_op(net(z_tilde)) - (y + adv_noise) ).pow(2).pow(.5).sum()
+loss_adv_partial = partial(loss_adv, z_tilde = z_tilde, y = measurement, meas_op = OpA)
 # init input optimizer (PGD or alternative methods like PAdam)
 adv_noise_mag = 0.05
 adv_noise_init = adv_noise_mag * torch.rand_like(measurement).to(device)
@@ -106,29 +116,18 @@ projection_l2 = partial(proj_l2_ball, radius = radius, centre = centre)
 
 
 # perform PAdam - uses the ADAM optimizer instead of GD and excludes the backtracking line search
-adversarial_noise = PAdam(
-    loss        = loss_adv_partial,
-    t_in        = adv_noise_init,
-    projs       = [projection_l2],
-    iter        = 10,
-    stepsize    = 1e-4,
-    silent      = False,
+adversarial_noise = PAdam_DIP(
+    loss          = loss_adv_partial,
+    net           = unet,
+    dip_optimizer = dip_optimizer,
+    t_in          = adv_noise_init,
+    projs         = [projection_l2],
+    iter          = 10,
+    stepsize      = 1e-4,
+    silent        = False,
 )
 
-
-perturbed_measurements = measurement + adversarial_noise
-perturbed_targets = unet.forward(perturbed_measurements)
-perturbed_images  = (perturbed_targets[:,0]**2 + perturbed_targets[:,1]**2)**.5
-fig, axs = plt.subplots( len(perturbed_images), 3, figsize=(10, 10) )
-for i, img in enumerate(perturbed_images):
-    if len(axs.shape) > 1:
-        ax = axs[i]
-    else: ax = axs
-    ax[0].imshow(v_tar.detach().cpu(), cmap = "Greys_r")#; ax[0].set_title("Original")
-    ax[1].imshow(img.detach().cpu(),   cmap = "Greys_r")#; ax[1].set_title("Perturbed")
-    ax[2].imshow(torch.abs( v_tar.detach().cpu() - img.detach().cpu() ), cmap = "Greys_r")#; ax[2].set_title("Residuals")
-
-[ax.set_axis_off() for ax in axs.flatten()]
-# remove whitespace and set tight layout
-fig.tight_layout()
-fig.savefig(os.getcwd() + "/adversarial_example.png", bbox_inches = "tight")
+perturbed_measurement = measurement + adversarial_noise
+torch.save(perturbed_measurement, os.getcwd() + "/adv_attack_dip/perturbed_measurement.pt")
+torch.save(adversarial_noise, os.getcwd() + "/adv_attack_dip/adv_noise.pt")
+torch.save(z_tilde, os.getcwd() + "/adv_attack_dip/z_tilde.pt")

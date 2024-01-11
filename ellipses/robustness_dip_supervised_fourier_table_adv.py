@@ -45,8 +45,8 @@ err_measure = err_measure_l2
 
 # select reconstruction methods
 methods_include = [
-    #"DIP UNet jit",
-    "Supervised UNet no jit",
+    "DIP UNet jit",
+    #"Supervised UNet no jit",
     #'L1',
     #"UNet it no jit",
     #"UNet it jit mod",
@@ -57,7 +57,7 @@ methods = methods.loc[methods_include]
 
 # select methods excluded from (re-)performing attacks
 methods_no_calc = [
-    "DIP UNet jit",
+    #"DIP UNet jit",
     "Supervised UNet no jit",
     #'L1',
     #"UNet it jit",
@@ -139,9 +139,10 @@ for (idx, method) in methods.iterrows():
                 noise_rel,
                 X_0_s,
                 Y_0_s,
-                store_data=True,
-                keep_init=keep_init,
-                err_measure=err_measure,
+                rec         = method["reconstr"],
+                store_data  = True,
+                keep_init   = keep_init,
+                err_measure = err_measure,
             )
             # store max current adversarial error
             (
@@ -218,7 +219,6 @@ if do_plot:
             print(f'idx: {idx}, method: {method}, res: {results.loc[idx].X_adv_err}')
             err_mean = results.loc[idx].X_adv_err[:, :].mean(dim=-1)
             err_std = results.loc[idx].X_adv_err[:, :].std(dim=-1)
-            breakpoint() 
             plt.plot(
                 noise_rel,
                 err_mean,

@@ -326,8 +326,8 @@ def untargeted_attack(
     codomain_dist     : Callable     = torch.nn.MSELoss(),
     weights           : Tuple        = (1.0, 1.0, 1.0),
     optimizer         : Callable     = PGD,
-    transform         : Callable = identity,
-    inverse_transform : Callable = identity,
+    transform         : Callable     = identity,
+    inverse_transform : Callable     = identity,
     **kwargs
 ):
     """ Untargeted finding of adversarial examples.
@@ -408,13 +408,14 @@ def err_measure_l2(x1, x2):
 
 
 def grid_attack(
-    method,
-    noise_rel,
-    X_0,
-    Y_0,
-    store_data=False,
-    keep_init=0,
-    err_measure=err_measure_l2,
+    method      : dict,
+    noise_rel   : torch.Tensor,
+    X_0         : torch.Tensor, 
+    Y_0         : torch.Tensor,
+    rec         : Callable = None,
+    store_data  : bool     = False,
+    keep_init   : int      = 0,
+    err_measure : Callable =err_measure_l2,
 ):
     """ Finding adversarial examples over a grid of multiple noise levels.
 
@@ -491,11 +492,11 @@ def grid_attack(
         )
         if (keep_init == 0) or (idx_noise == (len(noise_rel) - 1)):
             Y_adv_cur, Y_ref_cur, Y_0_cur = method.attacker(
-                X_0, noise_rel[idx_noise], yadv_init=None
+                X_0, noise_rel[idx_noise], yadv_init = None, rec = rec,
             )
         else:
             Y_adv_cur, Y_ref_cur, Y_0_cur = method.attacker(
-                X_0, noise_rel[idx_noise], yadv_init=Y_adv_cur
+                X_0, noise_rel[idx_noise], yadv_init=Y_adv_cur, rec = rec,
             )
 
         # compute adversarial and reference reconstruction
