@@ -22,6 +22,7 @@ from operators import (
 from find_adversarial import (
     PGD,
     PAdam,
+    PAdam_DIP,
     untargeted_attack,
     grid_attack,
 )
@@ -158,10 +159,11 @@ def _attackerNet(
     x0         : torch.Tensor,
     noise_rel  : float,
     net        : torch.nn.Module,
-    net_dinput : int = 2,
+    net_dinput : int          = 2,
     yadv_init  : torch.Tensor = None,
-    rec        : Callable = None,
-    batch_size : int = 3,
+    adv_optim  : Callable     = PAdam,
+    rec        : Callable     = None,
+    batch_size : int          = 3,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     -----------------------------------------------------------
@@ -207,7 +209,7 @@ def _attackerNet(
         "domain_dist"   : None,
         "mixed_dist"    : None,
         "weights"       : (1.0, 1.0, 1.0),
-        "optimizer"     : PAdam,
+        "optimizer"     : adv_optim,
         "projs"         : None,
         "iter"          : 1000,
         "stepsize"      : 5e0,
@@ -286,19 +288,21 @@ def _load_net(
 
 # methods dataframe append function for each net configuration
 def _append_net(
-    name : str, 
-    info : dict, 
-    net  : torch.nn.Module,
-    rec  : Callable = None,
+    name      : str, 
+    info      : dict, 
+    net       : torch.nn.Module,
+    adv_optim : Callable = PAdam,
+    rec       : Callable = None,
 ) -> None:
     """
     Appends reconstruction method to methods dataframe defined locally above.
     
     Args:
-    - name : name of the method
-    - info : metadata of the method for logging purposes
-    - net  : network loaded with pretrained parameters
-    - rec  : explicit reconstruction method
+    - name      : name of the method
+    - info      : metadata of the method for logging purposes
+    - net       : network loaded with pretrained parameters
+    - adv_optim : Optimizer function for adversarial noise optimization. 
+    - rec       : explicit reconstruction method
     Out: Nothing
     """
     if rec is None:
@@ -308,7 +312,7 @@ def _append_net(
         "info"     : info,
         "reconstr" : rec,
         "attacker" : lambda x0, noise_rel, yadv_init=None, rec=None: _attackerNet(
-            x0, noise_rel, net, yadv_init = yadv_init, rec = rec,
+            x0, noise_rel, net, yadv_init = yadv_init, adv_optim = adv_optim, rec = rec,
         ),
         "net": net,
     }
@@ -335,7 +339,7 @@ dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 
 # same as DIP
 from operators import to_complex
-z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
+#z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
 
 from functools import partial
 _append_net(
@@ -354,6 +358,7 @@ _append_net(
         UNet,
         dip_unet_params,
     ),
+    adv_optim = PAdam_DIP,
     rec = partial(
         _reconstructDIP, 
         f_optimizer = dip_f_optimizer,
