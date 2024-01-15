@@ -99,7 +99,7 @@ from functools import partial
 from operators import proj_l2_ball
 # define loss function
 # x - target image, y - measurements, net - DL model, adv_noise - adversarial noise
-loss_adv = lambda adv_noise, net,z_tilde,y, meas_op: ( meas_op(net(z_tilde)) - (y + adv_noise) ).pow(2).pow(.5).sum()
+loss_adv = lambda adv_noise, net,z_tilde,y, x, meas_op, beta: ( meas_op(net(z_tilde)) - (y + adv_noise) ).pow(2).sum() - beta*(net(z_tilde) - x).pow(2)
 loss_adv_partial = partial(loss_adv, z_tilde = z_tilde, y = measurement, meas_op = OpA)
 # init input optimizer (PGD or alternative methods like PAdam)
 adv_noise_mag = 0.05
@@ -116,7 +116,7 @@ projection_l2 = partial(proj_l2_ball, radius = radius, centre = centre)
 
 
 # perform PAdam - uses the ADAM optimizer instead of GD and excludes the backtracking line search
-adversarial_noise = PAdam_DIP(
+adversarial_noise = PAdam_DIP_theta(
     loss          = loss_adv_partial,
     net           = unet,
     dip_optimizer = dip_optimizer,

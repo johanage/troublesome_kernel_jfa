@@ -210,17 +210,110 @@ def PAdam(
     return t_in
 
 from functools import partial
-def PAdam_DIP(
+def PAdam_DIP_x(
     loss         : Callable,
-    # should be equivalent to issubclass(type(net), torch.nn.Module)
-    net          : Type[torch.nn.Module],
-    dip_optimizer: Type[torch.optim.Optimizer],
-    #z_tilde      : torch.Tensor,
-    #y0           : torch.Tensor,
+    x0          : torch.Tensor,
     t_in         : torch.Tensor, 
     projs        : Union[List[Callable], Tuple[Callable]] = None, 
-    iter         : int      = 50, 
+    niter        : int      = 50, 
     stepsize     : float    = 1e-2, 
+    silent       : bool     = False,
+) -> torch.Tensor:
+    """ (Proj.) Adam accelerated gradient decent with simple constraints.
+
+    Minimizes a given loss function subject to optional constraints. The
+    constraints must be "simple" in the sense that efficient projections onto
+    the feasible set exist.
+
+    Parameters
+    ----------
+    loss : callable
+        The loss or objective function.The revonstructed image xhat 
+        will be updated during the optimization process so this is a dynamic argument.
+        Loss function should be on the form:
+          l(delta = t_in, x_0 = Psi_theta(z_tilde), x = x) = ||Axhat - A(x+delta)|| - beta||xhat - x||
+    x0  : torch.Tensor
+        Initial condition for first step in two-step optimization process for finding adversarial noise for DIP.
+        Usually x_0 = Psi_theta(z_tilde) (output of the pre-trained DIP model)
+    t_in : torch.Tensor
+        The input tensor representing the adv. noise. This will be modified during
+        optimization. The provided tensor serves as initial guess for the
+        iterative optimization algorithm and will hold the result in the end.
+    projs : list or tuple of callables, optional
+        The projections onto the feasible set to perform after each gradient
+        descent step. They will be performed in the order given. (Default None)
+    niter : int, optional
+        Number of iterations. (Default 50)
+    stepsize : float, optional
+        The step size parameter for gradient descent. (Default 1e-2)
+    silent : bool, optional
+        Disable progress bar. (Default False)
+
+    Returns
+    -------
+    torch.tensor
+        The modified input t_in. Note that t_in is changed as a
+        side-effect, even if the returned tensor is discarded.
+    """
+
+    def _project(t_in):
+        with torch.no_grad():
+            t_tmp = t_in.clone()
+            if projs is not None:
+                # apply chain of projections
+               for proj in projs:
+                    t_tmp = proj(t_tmp)
+               t_in.data = t_tmp.data
+        return t_tmp
+    # clone and clear prev. computational graph of xhat
+    xhat = x0.clone().detach()
+    xhat.requires_grad = True
+    # init optimizer for reconstructed image xhat
+    optimizer_xhat = torch.optim.Adam((xhat,), lr=stepsize, eps=1e-5)
+    # init optimizer for adversarial noise
+    optimizer = torch.optim.Adam((t_in,), lr=stepsize, eps=1e-5)
+    t = tqdm(range(niter), desc="PAdam iter", disable=silent)
+    for it in t:
+        # ------------- xhat training step ------------------------------
+        # enable autograd on xhat and disable on t_in
+        xhat.requires_grad  = True
+        t_in.requires_grad = False
+        optimizer_xhat.zero_grad()
+        # update the net parameters minimizing the DIP loss function
+        xhat_loss = loss(t_in, xhat)
+        xhat_loss.backward()
+        # update dip net parameter
+        optimizer_xhat.step()
+        
+        # ------------- Adv. noise PGD step ------------------------------
+        t_in.requires_grad = True
+        xhat.requires_grad = False
+        # reset gradients of adv. noise tensor
+        if t_in.grad is not None:
+            t_in.grad.detach_()
+            t_in.grad.zero_()
+        # make partial loss with frozen xhat s.t. only t_in is updated
+        loss_adv_noise = partial(loss, xhat = xhat)
+        #  compute loss and take gradient step
+        # pre loss is loss before projection onto lp-ball
+        pre_loss = loss_adv_noise(t_in)
+        pre_loss.backward()
+        optimizer.step()
+        # project and evaluate
+        _project(t_in)
+        # post loss is loss after projection onto lp-ball
+        post_loss = loss_adv_noise(t_in)
+        t.set_postfix(pre_loss=pre_loss.item(), post_loss=post_loss.item())
+    return t_in
+
+def PAdam_DIP_theta(
+    loss         : Callable,
+    net          : Type[torch.nn.Module],
+    dip_optimizer: Type[torch.optim.Optimizer],
+    t_in         : torch.Tensor,
+    projs        : Union[List[Callable], Tuple[Callable]] = None,
+    iter         : int      = 50,
+    stepsize     : float    = 1e-2,
     silent       : bool     = False,
 ) -> torch.Tensor:
     """ (Proj.) Adam accelerated gradient decent with simple constraints.
@@ -262,7 +355,6 @@ def PAdam_DIP(
         The modified input t_in. Note that t_in is changed as a
         side-effect, even if the returned tensor is discarded.
     """
-
     def _project(t_in):
         with torch.no_grad():
             t_tmp = t_in.clone()
@@ -286,7 +378,7 @@ def PAdam_DIP(
         dip_loss.backward()
         # update dip net parameter
         dip_optimizer.step()
-        
+
         # ------------- Adv. noise PGD step ------------------------------
         # make sure only adv. noise is updatet in this step
         # turn of training mode in specific layers, fex. dropout
@@ -311,7 +403,6 @@ def PAdam_DIP(
         post_loss = loss_adv_noise(t_in)
         t.set_postfix(pre_loss=pre_loss.item(), post_loss=post_loss.item())
     return t_in
-
 
 # ----- Adversarial Example Finding -----
 

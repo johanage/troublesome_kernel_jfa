@@ -37,24 +37,22 @@ if gpu_avail:
     torch.cuda.set_device(device)
 
 # ----- measurement configuration -----
+"""
 mask_func = RadialMaskFunc(config.n, 40)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
+"""
 mask_fromfile = MaskFromFile(
     path = os.getcwd() + "/sampling_patterns/", 
     filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
 )
 # Fourier matrix
-#OpA_m = Fourier_m(mask)
 OpA_m = Fourier_m(mask_fromfile.mask[None])
 # Fourier operator
-#OpA = Fourier(mask)
 OpA = Fourier(mask_fromfile.mask[None])
-inverter = LearnableInverterFourier(config.n, mask, learnable=False)
 # set device for operators
 OpA_m.to(device)
-inverter.to(device)
 
 # ----- network configuration -----
 unet_params = {
@@ -63,7 +61,7 @@ unet_params = {
     "base_features" : 32,
     "out_channels"  : 2,
     "operator"      : OpA_m,
-    "inverter"      : None, #inverter,
+    "inverter"      : None, 
 }
 unet = UNet
 # ----- training configuration -----
@@ -80,11 +78,9 @@ train_params = {
     "num_epochs": num_epochs,
     "batch_size": 1,
     "loss_func": loss_func,
-    "save_path": os.path.join(config.RESULTS_PATH,"DIP"),
+    "save_path": os.path.join(config.RESULTS_PATH,"DIP/adv_attack"),
     "save_epochs": num_epochs//10,
-    #"optimizer": torch.optim.Adam,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
-    #"scheduler": torch.optim.lr_scheduler.StepLR,
     "scheduler_params": {"step_size": num_epochs//100, "gamma": 0.96},
     "acc_steps": 1,
 }
@@ -98,20 +94,18 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
 dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 sample = torch.load(dir_train + "sample_00000.pt")
-# sample is real valued so make fake imaginary part
-sample = sample[None].repeat(2,1,1)
-# set imaginary values to zero
-sample[1]   = torch.zeros_like(sample[1])
+from operators import to_complex
+# go from real to complex valued sample - set imag part to zero
+sample = to_complex(sample[None]).to(device)
+
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement[None].to(device)
+adv_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise.pt")
+perturbed_measurement = measurement + adv_noise
 
-# init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
-noise_mag = .1
-# same shape as SR problem in Ulyanov et al 2018
-z_tilde = noise_mag * torch.rand((1, unet_params["in_channels"],) + tuple(sample.shape[1:]))
-# save z_tilde in case needed for adv. noise study
-torch.save(z_tilde, os.getcwd() + "/adv_attack_dip/z_tilde.pt")
+# load the z_tilde used in pre-trained weights and to find aversarial noise
+z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
 z_tilde = z_tilde.to(device)
 
 # optimizer setup
@@ -152,7 +146,7 @@ for epoch in range(train_params["num_epochs"]):
     img, img_rec, pred_img = get_img_rec(sample, model_input, model = unet)
     # pred = A G(z_tilde, theta)
     pred = OpA(pred_img)
-    loss = loss_func(pred, measurement)
+    loss = loss_func(pred, perturbed_measurement)
     loss.backward()
     optimizer.step()
     scheduler.step()
@@ -188,7 +182,7 @@ for epoch in range(train_params["num_epochs"]):
             sampling_pattern = "circ_sr2.5e-1",
         )
         if epoch < train_params["num_epochs"] - 1:
-            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) )
+            torch.save(unet.state_dict(), path + "/DIP_UNet_adv_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) )
             ###### Plot evolution of training process #######
             cmap = "Greys_r"
             axs[0,isave].imshow(img_rec, cmap=cmap)
@@ -197,12 +191,11 @@ for epoch in range(train_params["num_epochs"]):
             axs[0,isave].set_axis_off(); axs[1,isave].set_axis_off()
             isave += 1       
         else:
-            torch.save(unet.state_dict(), path + "/DIP_UNet_{suffix}_last.pt".format(suffix = fn_suffix) )
+            torch.save(unet.state_dict(), path + "/DIP_UNet_adv_{suffix}_last.pt".format(suffix = fn_suffix) )
         
-
-# TODO make figures presentable and functions where it is necessary
+# remove whitespace and plot tighter
 fig.tight_layout()
-fig.savefig(os.getcwd() + "/DIP_evolution.png", bbox_inches="tight")
+fig.savefig(os.getcwd() + "/DIP_adv_evolution.png", bbox_inches="tight")
 
 # save final reconstruction
 unet.eval()

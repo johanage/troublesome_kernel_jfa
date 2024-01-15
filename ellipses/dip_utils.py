@@ -35,3 +35,12 @@ def plot_train_DIP(
     # savefig
     fig.tight_layout()
     fig.savefig(os.getcwd() + "/" +  save_fn, bbox_inches = "tight")
+
+def get_img_rec(sample, z_tilde, model):
+    img = torch.sqrt(sample[0]**2 + sample[1]**2).to("cpu")
+    reconstruction = model.forward(z_tilde)
+    img_rec = torch.sqrt(reconstruction[0,0]**2 + reconstruction[0,1]**2).detach().to("cpu")
+    return img, img_rec, reconstruction
+
+def center_scale_01(image):
+    return (image - image.min() )/ (image.max() - image.min() )
