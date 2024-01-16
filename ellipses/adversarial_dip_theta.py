@@ -102,8 +102,10 @@ from operators import proj_l2_ball
 loss_adv = lambda adv_noise, net,z_tilde,y, x, meas_op, beta: ( meas_op(net(z_tilde)) - (y + adv_noise) ).pow(2).sum() - beta*(net(z_tilde) - x).pow(2)
 loss_adv_partial = partial(loss_adv, z_tilde = z_tilde, y = measurement, meas_op = OpA)
 # init input optimizer (PGD or alternative methods like PAdam)
-adv_noise_mag = 0.05
-adv_noise_init = adv_noise_mag * torch.rand_like(measurement).to(device)
+adv_init_fac = 3
+noise_rel = 1e-2
+adv_noise_mag = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:]))
+adv_noise_init = adv_noise_mag * torch.randn_like(measurement).to(device)
 adv_noise_init.requires_grad = True
 
 # ------------- Projection setup -----------------------------
@@ -128,6 +130,6 @@ adversarial_noise = PAdam_DIP_theta(
 )
 
 perturbed_measurement = measurement + adversarial_noise
-torch.save(perturbed_measurement, os.getcwd() + "/adv_attack_dip/perturbed_measurement.pt")
-torch.save(adversarial_noise, os.getcwd() + "/adv_attack_dip/adv_noise.pt")
-torch.save(z_tilde, os.getcwd() + "/adv_attack_dip/z_tilde.pt")
+torch.save(perturbed_measurement, os.getcwd() + "/adv_attack_dip/adv_theta_perturbed_measurement.pt")
+torch.save(adversarial_noise, os.getcwd() + "/adv_attack_dip/adv_theta_adv_noise.pt")
+torch.save(z_tilde, os.getcwd() + "/adv_attack_dip/adv_theta_z_tilde.pt")

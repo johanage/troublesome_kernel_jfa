@@ -64,6 +64,12 @@ unet_params = {
     "inverter"      : None, 
 }
 unet = UNet
+# ------ construct network and train -----
+unet = unet(**unet_params)
+if unet.device == torch.device("cpu"):
+    unet = unet.to(device)
+assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
+
 # ----- training configuration -----
 mseloss = torch.nn.MSELoss(reduction="sum")
 def loss_func(pred, tar):
@@ -85,11 +91,6 @@ train_params = {
     "acc_steps": 1,
 }
 
-# ------ construct network and train -----
-unet = unet(**unet_params)
-if unet.device == torch.device("cpu"):
-    unet = unet.to(device)
-assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
 # get train and validation data
 dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
 dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
@@ -203,4 +204,4 @@ img, img_rec, rec = get_img_rec(sample, z_tilde, model = unet)
 # center and normalize to x_hat in [0,1]
 img_rec = (img_rec - img_rec.min() )/ (img_rec.max() - img_rec.min() )
 from dip_utils import plot_train_DIP
-plot_train_DIP(img, img_rec, logging)
+plot_train_DIP(img, img_rec, logging, save_fn = "DIP_adv_train_metrics.png")

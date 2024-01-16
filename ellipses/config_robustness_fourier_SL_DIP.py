@@ -22,7 +22,8 @@ from operators import (
 from find_adversarial import (
     PGD,
     PAdam,
-    PAdam_DIP,
+    PAdam_DIP_x,
+    PAdam_DIP_theta,
     untargeted_attack,
     grid_attack,
 )
@@ -63,106 +64,40 @@ methods = methods.set_index("name")
 noise_ref = noise_gaussian
 
 # ----- set up net attacks --------
-
-# loss
+# loss functions
 mseloss = torch.nn.MSELoss(reduction="sum")
 def _complexloss(reference, prediction):
     loss = mseloss(reference, prediction)
     return loss
 
-# the actual reconstruction method for any net
-#def _reconstructNet(y, noise_rel, net):
-def _reconstructNet(y, net):
-    return net.forward(y)
-
-from types import GeneratorType
-mseloss = torch.nn.MSELoss(reduction="sum")
 def loss_func(pred, tar):
     return (
         mseloss(pred, tar) / pred.shape[0]
     )
+# first step loss function DIP on xhat
+from dip_utils import loss_adv
+#l_adv = ||A xhat - (Ax + delta)||_2^2 - beta * || x - xhat||_2^2
+# A = meas_op, 
+loss_adv_partial = partial(loss_adv,  meas_op = OpA, beta = 1e-3)
 
-from tqdm import tqdm
-def _reconstructDIP(
-    y0          : torch.Tensor,
-    net         : Type[torch.nn.Module], 
-    f_optimizer : Callable[GeneratorType, Type[torch.optim.Optimizer]],
-    f_scheduler : Callable[Type[torch.optim.Optimizer], Type[torch.optim.lr_scheduler.LRScheduler]],
-    z_tilde     : torch.Tensor,
-    epochs      : int,
-    loss_func   : Callable = loss_func,
-    sigma_p     : float    = 1/30,
-) -> torch.Tensor:
-    """
-    DIP reconstruction algorithm.
-    Args:
-    - y0          : The noiseless measurements
-    - net         : DIP network
-    - f_optimizer : Function with predetermined optimization params
-                    that takes net parameters as input. 
-    - f_scheudler : Function with predetermined lr scheduler params
-                    that takes optimizer object as input.
-    - z_tilde     : The fixed random input vector of the DIP net, 
-                    this is decoded to an image.
-    - sigma_p     : DIP uses jittering, magnitude of Gaussian jittering noise.
-    """
-    # set device for net and z_tilde
-    net.to(device); z_tilde = z_tilde.to(device)
-    # activate train-based layers
-    net.train()
-    # set parameters to be trainable
-    for param in net.parameters():
-        param.requires_grad = True
-    optimizer = f_optimizer(net.parameters())
-    scheduler = f_scheduler(optimizer)
-    # progressbar setup
-    progress_bar = tqdm(
-        desc="Train DIP ",
-        total=epochs,
-    )
 
-    for epoch in range(epochs):
-        # set gradients to zero
-        optimizer.zero_grad()
-        # add gaussian noise to noise input according to Ulyanov et al 2020
-        additive_noise = sigma_p*torch.randn(z_tilde.shape).to(device)
-        model_input = z_tilde + additive_noise
-        model_input.to(device)
-        # pred_img = Psi_theta(z_tilde + additive_noise)
-        pred_img = net.forward(model_input)
-        # pred = A G(z_tilde, theta)
-        pred = OpA(pred_img)
-        loss = loss_func(pred, y0)
-        loss.backward()
-        # update weights
-        optimizer.step()
-        # update lr
-        scheduler.step()
-        # udate progress bar
-        progress_bar.update(1)
-        progress_bar.set_postfix(
-            **net._add_to_progress_bar({"loss": loss.item()})
-        )
+# the actual reconstruction method for any supervised net
+# def _reconstructNet(y, noise_rel, net):
+def _reconstructNet(y, net):
+    return net.forward(y)
 
-    # ----------- Image reconstruction -------------------
-    # deactivate train-based layers
-    net.eval()
-    # freeze parameters
-    for param in net.parameters():
-        param.requires_grad = False
-    # no jittering used in last reconstruction - only during training
-    pred_img = net.forward(z_tilde)
-    return pred_img
+# unsure if necessary
+from dip_utils import _reconstructDIP
 
 # attack function for any net
+from typing import Dict
 def _attackerNet(
     x0         : torch.Tensor,
     noise_rel  : float,
     net        : torch.nn.Module,
-    net_dinput : int          = 2,
     yadv_init  : torch.Tensor = None,
     adv_optim  : Callable     = PAdam,
-    rec        : Callable     = None,
+    rec_config : dict         = None,
     batch_size : int          = 3,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
@@ -176,23 +111,43 @@ def _attackerNet(
     method given in dictionary adv_param.
     -----------------------------------------------------------
     Args:
-    - x0        : ground truth image
-    - noise_rel : noise level relative to the ground truth image
-    - net       : DNN to use
-    - yadv_init : initial adversarial measurements
-    - rec       : reconstruction function
-    - batch_size: batch size
+    - x0         : ground truth image
+    - noise_rel  : noise level relative to the ground truth image
+    - net        : DNN to use
+    - yadv_init  : initial adversarial measurements
+    - rec_config : dict containing reconstruction function and necessary config
+    - batch_size : batch size
     Out:
     - yadv : adversarial measurement
     - yref : refrence measuruement (measurement with gaussian noise)
     - y0   : noiseless measurment
     """
     # set reconstruction function
-    if rec is None:
+    if rec_config is None:
+        #rec = partial(_reconstructNet, net=net)
         rec = lambda y: _reconstructNet(y, net)
     # this can be changed to string instead of boolean condition if more learning paradigms are added
     else:
-        rec = partial(rec, net=net)
+        # setup DIP that computes new reconstructions implicitly using theta
+        if rec_config["reconstruction_method"] == "DIP_theta":
+            z_tilde = rec_config["z_tilde"]
+            if z_tilde is None:
+                # z_tilde ~ U([0,noise_mag]) with shape of (batch_size, input_channel, image_w, image_h)
+                noise_mag = 0.1
+                z_tilde   = noise_mag * torch.rand((batch_size, rec_config["net_in_channels"]) + x0.shape[-2:])
+                z_tilde.to(device)
+                if rec_config["save_ztilde"]:
+                    torch.save(z_tilde, config.RESULTS_PATH + "/tmp/" + rec_config["reconstruction_method"] + ".pt")
+            # update reconstruction including the z_tilde vector for each measurement
+            rec = rec_config["rec_func_adv_noise"]
+            rec = partial(rec, net = net, z_tilde = z_tilde)
+        # setup for DIP that computes new reconstructions explicitly
+        if rec_config["reconstruction_method"] == "DIP_x":
+            rec = rec_config["rec_func_adv_noise"]
+   
+    """-------------------------------------------------------------------------------------------------------------
+       After this step the reconstruction function "rec" can only take a single argument which are the measurements.
+       -------------------------------------------------------------------------------------------------------------"""
     # compute noiseless measurements
     y0 = OpA(x0)
 
@@ -228,30 +183,24 @@ def _attackerNet(
             + str(list(range(idx_batch, idx_batch + batch_size)))
         )
         y0_batch = y0[idx_batch : idx_batch + batch_size, ...]
-        if rec is not None:
-            # z_tilde ~ U([0,noise_mag]) with shape of (batch_size, input_channel, image_w, image_h)
-            noise_mag = 0.1
-            z_tilde   = noise_mag * torch.rand((batch_size, net_dinput) + x0.shape[-2:])
-            z_tilde.to(device)
-            # update reconstruction including the z_tilde vector for each measurement
-            rec = partial(rec, z_tilde = z_tilde)
+        
         # set l2-ball projection
         # - centered at y0[idx_batch : idx_batch + batch_size, ...]
         # - with radius given by noise_level[idx_batch : idx_batch + batch_size, ...]
         adv_param["projs"] = [
             lambda y: proj_l2_ball(
                 y,
-                #y0[idx_batch : idx_batch + batch_size, ...],
                 y0_batch,
                 noise_level[idx_batch : idx_batch + batch_size, ...],
             )
         ]
         # perform untargeted attack
+        # TODO: make this work with DIP_x method
+        # - make flexible to different loss functions in find_adversarial.py
+        # - change from computing adversarial noise to adversarial example
         yadv[idx_batch : idx_batch + batch_size, ...] = untargeted_attack(
-            # default | rec = lambda y: _reconstructNet(y, net),
             func      = rec,
             t_in_adv  = yadv[idx_batch : idx_batch + batch_size, ...].clone().requires_grad_(True),
-            #t_in_ref  = y0[idx_batch : idx_batch + batch_size, ...],
             t_in_ref  = y0_batch,
             t_out_ref = x0[idx_batch : idx_batch + batch_size, ...],
             **adv_param
@@ -288,39 +237,41 @@ def _load_net(
 
 # methods dataframe append function for each net configuration
 def _append_net(
-    name      : str, 
-    info      : dict, 
-    net       : torch.nn.Module,
-    adv_optim : Callable = PAdam,
-    rec       : Callable = None,
+    name       : str, 
+    info       : dict, 
+    net        : torch.nn.Module,
+    adv_optim  : Callable = PAdam,
+    rec_config : dict = None,
 ) -> None:
     """
     Appends reconstruction method to methods dataframe defined locally above.
     
     Args:
-    - name      : name of the method
-    - info      : metadata of the method for logging purposes
-    - net       : network loaded with pretrained parameters
-    - adv_optim : Optimizer function for adversarial noise optimization. 
-    - rec       : explicit reconstruction method
+    - name       : name of the method
+    - info       : metadata of the method for logging purposes
+    - net        : network loaded with pretrained parameters
+    - adv_optim  : Optimizer function for adversarial noise optimization. 
+    - rec_config : config with explicit reconstruction method and relevant keyword arguments
     Out: Nothing
     """
-    if rec is None:
-        # lambda y, noise_rel: _reconstructNet(y, noise_rel, net),
+    if rec_config is None:
         rec = partial(_reconstructNet, net=net)
+        rec_config = {
+            "reconstruction_method"   : "supervised",
+            "reconstruction_function" : rec, 
+        }
+    else:
+        rec = rec_config["reconstruction_function"]
     methods.loc[name] = {
         "info"     : info,
         "reconstr" : rec,
-        "attacker" : lambda x0, noise_rel, yadv_init=None, rec=None: _attackerNet(
-            x0, noise_rel, net, yadv_init = yadv_init, adv_optim = adv_optim, rec = rec,
+        "attacker" : lambda x0, noise_rel, yadv_init=None, rec_config=None: _attackerNet(
+            x0, noise_rel, net, yadv_init = yadv_init, adv_optim = adv_optim, rec_config = rec_config,
         ),
         "net": net,
     }
 
 # ----- DIP UNet configuration -----
-
-
-
 dip_unet_params = {
     "in_channels"   : 2,
     "drop_factor"   : 0.0,
@@ -329,7 +280,18 @@ dip_unet_params = {
     "operator"      : OpA_m,
     "inverter"      : None, 
 }
+# initialize model used for initial condition
+unet = UNet(**dip_unet_params)
+unet.to(device)
 
+# load model weights
+param_dir = os.getcwd() + "/models/DIP/"
+file_param = "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
+params_loaded = torch.load(param_dir + file_param)
+unet.load_state_dict(params_loaded)
+unet.eval()
+
+# optimization config for final reconstruction
 dip_optimizer_params    = {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0}
 dip_f_optimizer           = lambda net_params, opt_params=dip_optimizer_params : torch.optim.Adam(net_params, **opt_params)
 dip_lr_scheduler_params = {"step_size": 100, "gamma": 0.96} 
@@ -339,12 +301,12 @@ dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 
 # same as DIP
 from operators import to_complex
-#z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
+z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
 
 from functools import partial
 _append_net(
-    "DIP UNet jit",
-    {
+    name = "DIP UNet jit",
+    info = {
         "name_disp": "DIP UNet w/ low noise",
         "name_save": "dip_unet_jit",
         "plt_color": "#023eff",
@@ -352,19 +314,26 @@ _append_net(
         "plt_linestyle": "--",
         "plt_linewidth": 2.75,
     },
-    _load_net(
+    net = _load_net(
         f"{config.RESULTS_PATH}/DIP/"
         + "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt",
         UNet,
         dip_unet_params,
     ),
-    adv_optim = PAdam_DIP,
-    rec = partial(
-        _reconstructDIP, 
-        f_optimizer = dip_f_optimizer,
-        f_scheduler = dip_f_lr_scheduler,
-        epochs      = 1000,
-    ),
+    adv_optim  = partial(PAdam_DIP_x, x0 = unet(z_tilde)),
+    rec_config = {
+        "reconstruction_method"   : "DIP_x",
+        "reconstruction_function" : partial(
+            _reconstructDIP, 
+            f_optimizer = dip_f_optimizer,
+            f_scheduler = dip_f_lr_scheduler,
+            epochs      = 1000,
+        ),
+        "rec_func_adv_noise" : lambda x : x,
+        "z_tilde"            : None,
+        "net_in_channels"    : dip_unet_params["in_channels"],
+        "save_ztilde"        : True,
+    }
 )
 
 # ----- Supervised UNet configuration -----

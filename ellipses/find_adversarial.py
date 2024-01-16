@@ -145,10 +145,10 @@ def PAdam(
     loss     : Callable, 
     t_in     : torch.Tensor, 
     projs    : Union[List[Callable], Tuple[Callable]] = None, 
-    iter     : int = 50, 
+    niter     : int = 50, 
     stepsize : float = 1e-2, 
     silent   : bool =False,
-):
+) -> torch.Tensor:
     """ (Proj.) Adam accelerated gradient decent with simple constraints.
 
     Minimizes a given loss function subject to optional constraints. The
@@ -192,7 +192,7 @@ def PAdam(
 
     # run optimization
     optimizer = torch.optim.Adam((t_in,), lr=stepsize, eps=1e-5)
-    t = tqdm(range(iter), desc="PAdam iter", disable=silent)
+    t = tqdm(range(niter), desc="PAdam iter", disable=silent)
     for it in t:
         # reset gradients
         if t_in.grad is not None:
@@ -212,7 +212,7 @@ def PAdam(
 from functools import partial
 def PAdam_DIP_x(
     loss         : Callable,
-    x0          : torch.Tensor,
+    x0           : torch.Tensor,
     t_in         : torch.Tensor, 
     projs        : Union[List[Callable], Tuple[Callable]] = None, 
     niter        : int      = 50, 
@@ -303,7 +303,11 @@ def PAdam_DIP_x(
         _project(t_in)
         # post loss is loss after projection onto lp-ball
         post_loss = loss_adv_noise(t_in)
-        t.set_postfix(pre_loss=pre_loss.item(), post_loss=post_loss.item())
+        t.set_postfix(
+            pre_loss=pre_loss.item(), 
+            post_loss=post_loss.item(), 
+            l2norm_tin=t_in.pow(2).sum().item()
+        )
     return t_in
 
 def PAdam_DIP_theta(
@@ -405,8 +409,6 @@ def PAdam_DIP_theta(
     return t_in
 
 # ----- Adversarial Example Finding -----
-
-
 def untargeted_attack(
     func              : Callable,
     t_in_adv          : torch.Tensor,
@@ -437,7 +439,10 @@ def untargeted_attack(
     Parameters
     ----------
     func : callable
-        The function f.
+        The function f. For image reconstruction it's the function that
+        reconstructs the image.
+        Supervised : Psi_theta(y)
+        DIP        : ||Axhat - A(x+delta)|| - beta * ||xhat -||Axhat - A(x+delta)|| - beta * ||xhat - x||
     t_in_adv : torch.Tensor
         The adversarial input tensor. This will be modified during
         optimization. The provided tensor serves as initial guess for the
@@ -454,7 +459,8 @@ def untargeted_attack(
         Weighting factor for the distance measures in the objective.
         (Default (1.0, 1.0, 1.0))
     optimizer : callable, optional
-        The routine used for solving the optimization problem. (Default `PGD`)
+        The routine used for solving the optimization problem. (Default `PGD`i)
+        Typically have the structure optimizer(loss, t_in, **kwargs)
     transform : callable, optional
         Domain variable transform. (Default `identity`)
     inverse_transform : callable, optional
@@ -471,11 +477,16 @@ def untargeted_attack(
 
     t_in_adv.data = inverse_transform(t_in_adv.data)
     if t_out_ref is None:
+        # if GT out is not given compute rec. from noiseless meas.
         t_out_ref = func(t_in_ref)
 
     # loss closure
     def _closure(t_in):
+        # 1. Apply transform to perturbed measurment 
+        # 2. Reconstruct image using func 
         t_out = func(transform(t_in))
+        # computing codomain distance between reconstructed t and reference output
+        # i.e. rec. image from perturbed meas. xhat and GT image x0
         loss = -weights[1] * codomain_dist(t_out, t_out_ref)
         if domain_dist is not None:
             loss += weights[0] * domain_dist(transform(t_in), t_in_ref)
@@ -506,7 +517,7 @@ def grid_attack(
     rec         : Callable = None,
     store_data  : bool     = False,
     keep_init   : int      = 0,
-    err_measure : Callable =err_measure_l2,
+    err_measure : Callable = err_measure_l2,
 ):
     """ Finding adversarial examples over a grid of multiple noise levels.
 

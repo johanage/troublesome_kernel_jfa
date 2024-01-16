@@ -1,10 +1,9 @@
 from matplotlib import pyplot as plt
-import os, sys, torch
+import os, sys, torch, numpy as np
 from networks import UNet
 from operators import (
     Fourier,
     Fourier_matrix as Fourier_m,
-    LearnableInverterFourier,
     RadialMaskFunc,
     MaskFromFile,
 )
@@ -23,11 +22,9 @@ mask_fromfile = MaskFromFile(
 # Fourier matrix
 OpA = Fourier(mask_fromfile.mask[None])
 OpA_m = Fourier_m(mask_fromfile.mask[None])
-inverter = LearnableInverterFourier(config.n, mask_fromfile.mask[None], learnable=False)
 
 # set device for operators
 OpA_m.to(device)
-inverter.to(device)
 
 # ----- Network configuration -----
 unet_params = {
@@ -36,33 +33,9 @@ unet_params = {
     "base_features" : 32,
     "out_channels"  : 2,
     "operator"      : OpA_m,
-    "inverter"      : None, #inverter,
+    "inverter"      : None, 
 }
 unet = UNet
-
-# ----- Training configuration -----
-mseloss = torch.nn.MSELoss(reduction="sum")
-def loss_func(pred, tar):
-    return (
-        mseloss(pred, tar) / pred.shape[0]
-    )
-
-# Set adv. training parameters
-num_epochs = 1000
-init_lr = 5e-4
-train_params = {
-    "num_epochs": num_epochs,
-    "batch_size": 1,
-    "loss_func": loss_func,
-    "save_path": os.path.join(config.RESULTS_PATH,"DIP"),
-    "save_epochs": num_epochs//10,
-    "optimizer": torch.optim.Adam,
-    "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
-    "scheduler": torch.optim.lr_scheduler.StepLR,
-    "scheduler_params": {"step_size": num_epochs//100, "gamma": 0.96},
-    "acc_steps": 1,
-}
-
 # ------ construct network and train -----
 unet = unet(**unet_params)
 if unet.device == torch.device("cpu"):
@@ -99,16 +72,19 @@ from operators import proj_l2_ball
 # define loss function
 # xhat - reconstructed image, x - target image, adv_noise - adversarial noise
 # init xhat = Psi_theta(z_tilde)
-loss_adv = lambda adv_noise, xhat, x, meas_op, beta: ( meas_op(xhat) - (meas_op(x) + adv_noise) ).pow(2).sum() - beta * (xhat - x).pow(2).sum() 
-loss_adv_partial = partial(loss_adv,  x = tar_complex, meas_op = OpA, beta = 0.5)
+#loss_adv = lambda adv_noise, xhat, x, meas_op, beta: ( meas_op(xhat) - (meas_op(x) + adv_noise) ).pow(2).sum() - beta * (xhat - x).pow(2).sum() 
+from dip_utils import loss_adv
+loss_adv_partial = partial(loss_adv,  x = tar_complex, meas_op = OpA, beta = 1e-3)
 # init input optimizer (PGD or alternative methods like PAdam)
-adv_noise_mag = 0.05
-adv_noise_init = adv_noise_mag * torch.rand_like(measurement).to(device)
+adv_init_fac = 3
+noise_rel = 1e-3
+adv_noise_mag = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:]))
+adv_noise_init = adv_noise_mag * torch.randn_like(measurement).to(device)
 adv_noise_init.requires_grad = True
 
 # ------------- Projection setup -----------------------------
 # radius is the upper bound of the lp-norm of the projeciton operator
-radius = torch.tensor(1e-1).to(device)
+radius = noise_rel * measurement.norm(p=2)
 # centre is here the centre of the perturbations of the measurements
 # since we have chosen to optimize the adv. noise and not adv. measurements (/example)
 # centre set to zero freq since measurements are zero-shifted
@@ -121,7 +97,7 @@ adversarial_noise = PAdam_DIP_x(
     x0            = unet(z_tilde), 
     t_in          = adv_noise_init,
     projs         = [projection_l2],
-    niter         = 50,
+    niter         = 10000,
     stepsize      = 1e-4,
     silent        = False,
 )

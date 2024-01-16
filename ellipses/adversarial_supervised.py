@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-import os, sys, torch
+import os, sys, torch, numpy as np
 from networks import UNet
 from operators import (
     Fourier,
@@ -40,8 +40,13 @@ unet_params = {
 }
 unet = UNet
 unet = unet(**unet_params)
-param_dir_phase1 = os.getcwd() + "/models/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_1/"
-param_dir_phase2 = os.getcwd() + "/models/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+param_dir_phase1 = os.getcwd() + "/models/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_1/"
+param_dir_phase2 = os.getcwd() + "/models/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+# load model weights
+file_param = "model_weights.pt"
+params_loaded = torch.load(param_dir_phase2 + file_param)
+unet.load_state_dict(params_loaded)
+unet.eval()
 
 # get train and validation data
 dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
@@ -52,11 +57,6 @@ v_tar = torch.load(dir_val + "sample_00000.pt").to(device)
 v_tar_complex = to_complex(v_tar[None]).to(device)
 measurement = OpA(v_tar_complex).to(device)[None]
 
-# load model weights
-file_param = "model_weights.pt"
-params_loaded = torch.load(param_dir_phase2 + file_param)
-unet.load_state_dict(params_loaded)
-unet.eval()
 from find_adversarial import PGD, PAdam
 from functools import partial
 from operators import proj_l2_ball
@@ -66,8 +66,10 @@ loss_adv = lambda adv_noise,x,y,net: (net(y + adv_noise) - x).pow(2).pow(.5).sum
 loss_adv_partial = partial(loss_adv, x = v_tar, y = measurement, net = unet)
 
 # init input optimizer (PGD or alternative methods like PAdam)
-adv_noise_mag = 0.05
-adv_noise_init = adv_noise_mag * torch.rand_like(measurement).to(device)
+adv_init_fac = 3
+noise_rel = 0.05
+adv_noise_mag = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:])) 
+adv_noise_init = adv_noise_mag * torch.randn_like(measurement).to(device)
 adv_noise_init.requires_grad = True
 
 # ------------- Projection setup -----------------------------
@@ -118,4 +120,4 @@ for i, img in enumerate(perturbed_images):
 [ax.set_axis_off() for ax in axs.flatten()]
 # remove whitespace and set tight layout
 fig.tight_layout()
-fig.savefig(os.getcwd() + "/adversarial_example.png", bbox_inches = "tight")
+fig.savefig(os.getcwd() + "/plots/adversarial_attacks/adversarial_example.png", bbox_inches = "tight")
