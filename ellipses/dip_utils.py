@@ -3,6 +3,16 @@ import torch
 import pandas as pd
 from mpl_toolkits.axes_grid1 import make_axes_locatable as mal
 import os
+# type checking arguments in function# type checking arguments in functions
+from typing import Union, Type, Callable, Generator
+
+# ----- global configuration -----
+device = torch.device("cpu")
+# if GPU availablei
+gpu_avail = torch.cuda.is_available()
+if gpu_avail:
+    device = torch.device("cuda:0")
+    torch.cuda.set_device(device)
 
 def plot_train_DIP(
     img     : torch.tensor,
@@ -46,7 +56,7 @@ def center_scale_01(image):
     return (image - image.min() )/ (image.max() - image.min() )
 
 import operators
-def loss_adv(
+def loss_adv_noise(
     adv_noise : torch.Tensor, 
     xhat      : torch.Tensor,  
     x         : torch.Tensor, 
@@ -70,14 +80,44 @@ def loss_adv(
     recerr = xhat - x
     return (yhat - y_perturbed).pow(2).sum() - beta * recerr.pow(2).sum()
 
-from types import GeneratorType
+def loss_adv_example(
+    adv_example : torch.Tensor,
+    xhat        : torch.Tensor,
+    x           : torch.Tensor,
+    meas_op     : operators.Fourier,
+    beta        : float,
+) -> torch.Tensor:
+    """
+    Loss function used in the first step to acquire the adversarial noise.
+       l_adv = ||A xhat - y_adv||_2^2 - beta * || x - xhat||_2^2
+    
+    Args:
+    - adv_example : adversarial example
+    - xhat        : reconstructed image
+    - x           : ground truth image
+    - meas_op     : measurement operator A
+    - beta        : parameter of penalizing closeness between orig. image x and reconstructed image xhat
+    Out:
+    - l_adv as written above
+    """
+    yhat = meas_op(xhat)
+    y_perturbed = adv_example
+    recerr = xhat - x
+    return (yhat - y_perturbed).pow(2).sum() - beta * recerr.pow(2).sum()
+
 from tqdm import tqdm
+mseloss = torch.nn.MSELoss(reduction="sum")
+
+def loss_func(pred, tar):
+    return mseloss(pred, tar) / pred.shape[0]
+
 def _reconstructDIP(
     y0          : torch.Tensor,
     net         : Type[torch.nn.Module],
-    f_optimizer : Callable[GeneratorType, Type[torch.optim.Optimizer]],
+    f_optimizer : Callable[Generator, Type[torch.optim.Optimizer]],
     f_scheduler : Callable[Type[torch.optim.Optimizer], Type[torch.optim.lr_scheduler.LRScheduler]],
     z_tilde     : torch.Tensor,
+    OpA         : Union[operators.Fourier, torch.Tensor],
     epochs      : int,
     loss_func   : Callable = loss_func,
     sigma_p     : float    = 1/30,

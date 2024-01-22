@@ -170,7 +170,8 @@ for epoch in range(train_params["num_epochs"]):
             "psnr" : psnr_pred,
             "ssim" : ssim_pred,
         }, 
-        index = [0] )
+        index = [0], 
+    )
     logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
     
     # update progress bar

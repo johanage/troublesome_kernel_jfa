@@ -17,21 +17,39 @@ from operators import to_complex
 import config  
 import config_robustness_fourier_SL_DIP as cfg_rob  
 methods = cfg_rob.methods
+# select reconstruction methods
+methods_include = [
+    "DIP UNet no jit",
+    "Supervised UNet no jit",
+    #'L1',
+    #"UNet it no jit",
+    #"UNet it jit mod",
+    #"UNet it jit",
+]
+methods_plot = methods_include #["L1", "UNet it jit mod",  "UNet it no jit"]
+methods = methods.loc[methods_include]
 
+# select methods excluded from (re-)performing attacks
+methods_no_calc = [
+    "DIP UNet no jit",
+    "Supervised UNet no jit",
+    #'L1',
+    #"UNet it jit",
+    #"UNet it no jit",
+    #"UNet it jit mod",
+]
 # ------ general setup ----------
-
 device = cfg_rob.device
-
 save_path = os.path.join(config.RESULTS_PATH, "attacks")
 save_results = os.path.join(save_path, "dip_supervised_table_adv.pkl")
-
+# plot config
 do_plot = True
 save_plot = True
 save_table = True
 
 # ----- attack setup -----
-
 # select samples
+# selecting sample numbers 50, ..., 59
 samples = tuple(range(50, 60))
 
 it_init = 6
@@ -43,30 +61,7 @@ noise_rel = torch.tensor([0.00, 0.02, 0.04, 0.06, 0.08])
 # select measure for reconstruction error
 err_measure = err_measure_l2
 
-# select reconstruction methods
-methods_include = [
-    "DIP UNet jit",
-    #"Supervised UNet no jit",
-    #'L1',
-    #"UNet it no jit",
-    #"UNet it jit mod",
-    #"UNet it jit",
-]
-methods_plot = methods_include #["L1", "UNet it jit mod",  "UNet it no jit"]
-methods = methods.loc[methods_include]
-
-# select methods excluded from (re-)performing attacks
-methods_no_calc = [
-    #"DIP UNet jit",
-    "Supervised UNet no jit",
-    #'L1',
-    #"UNet it jit",
-    #"UNet it no jit",
-    #"UNet it jit mod",
-]
-
 # ----- perform attack -----
-
 # select samples
 val_data = IPDataset("val", config.DATA_PATH)
 X_0 = torch.stack([val_data[s][0] for s in samples])
@@ -118,15 +113,14 @@ for (idx, method) in methods.iterrows():
 
         for s in range(s_len):
             print("Sample: {}/{}".format(s + 1, s_len))
+            # sample at index s repeated it_init times 
             X_0_s = X_0[s : s + 1, ...].repeat(
                 it_init, *((X_0.ndim - 1) * (1,))
             )
             Y_0_s = Y_0[s : s + 1, ...].repeat(
                 it_init, *((Y_0.ndim - 1) * (1,))
             )
-            # noise_rel - noise levels
-            # X_0_s     - images batch
-            # Y_0_s     - measurement batch
+            # grid attack using noise_rel noise levels 
             (
                 X_adv_err_cur,
                 X_ref_err_cur,
@@ -139,7 +133,6 @@ for (idx, method) in methods.iterrows():
                 noise_rel,
                 X_0_s,
                 Y_0_s,
-                rec         = method["reconstr"],
                 store_data  = True,
                 keep_init   = keep_init,
                 err_measure = err_measure,
@@ -228,7 +221,8 @@ if do_plot:
                 color     = method["info"]["plt_color"],
                 label     = method["info"]["name_disp"],
             )
-            if idx == "L1" or idx == "UNet it jit mod" or idx == "UNet it jit" or idx == "UNet it no jit":
+            fill_between_methods = ("L1", "UNet it jit mod", "UNet it jit", "UNet it no jit", "DIP UNet no jit", "Supervised UNet no jit")
+            if idx in fill_between_methods:
                 plt.fill_between(
                     noise_rel,
                     err_mean + err_std,
@@ -238,7 +232,7 @@ if do_plot:
                 )
 
     plt.yticks(np.arange(0, 1, step=0.05))
-    plt.ylim((-0.01, 0.36))
+    #plt.ylim((-0.01, 0.36))
     #ax.set_xticks(ax.get_xticks().tolist()[1:-1])
     ax.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
     ax.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])

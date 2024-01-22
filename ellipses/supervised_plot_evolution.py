@@ -50,6 +50,7 @@ dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 v_tar = torch.load(dir_val + "sample_00000.pt").to(device)
 v_tar_complex = to_complex(v_tar[None]).to(device)
 measurement = OpA(v_tar_complex).to(device)[None]
+
 # plot stuff
 cmap = "Greys_r"
 isave = 0
@@ -74,4 +75,17 @@ for indices, param_dir in zip([ [0,6,12,15,18,24,30,35], [3, 6]], [param_dir_pha
         axs_evo[1,isave].imshow(imres, cmap=cmap)
         isave +=1
 fig_evo.tight_layout()
-fig_evo.savefig(os.getcwd() + "/" + fn_evolution + ".png", bbox_inches="tight")
+fig_evo.savefig(os.getcwd() + "/plots/supervised/" + fn_evolution + ".png", bbox_inches="tight")
+
+# load final net
+file_param = "model_weights.pt"
+params_loaded = torch.load(param_dir + file_param)
+unet.load_state_dict(params_loaded)
+# rec image
+imrec_final = unet.forward(measurement)
+# plot and save final reconstruction 
+plt.figure(); plt.imshow(imrec_final, cmap=cmap)
+plt.savefig(os.getcwd() + "/plots/supervised/supervised_final_rec_circ_sr0.25.png")
+# and original image
+plt.figure(); plt.imshow(v_tar, cmap=cmap)
+plt.savefig(os.getcwd() + "/plots/supervised/supervised_orig_sample.png")

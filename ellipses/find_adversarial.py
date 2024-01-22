@@ -145,7 +145,7 @@ def PAdam(
     loss     : Callable, 
     t_in     : torch.Tensor, 
     projs    : Union[List[Callable], Tuple[Callable]] = None, 
-    niter     : int = 50, 
+    niter    : int = 50, 
     stepsize : float = 1e-2, 
     silent   : bool =False,
 ) -> torch.Tensor:
@@ -212,8 +212,8 @@ def PAdam(
 from functools import partial
 def PAdam_DIP_x(
     loss         : Callable,
-    x0           : torch.Tensor,
     t_in         : torch.Tensor, 
+    xhat0        : torch.Tensor,
     projs        : Union[List[Callable], Tuple[Callable]] = None, 
     niter        : int      = 50, 
     stepsize     : float    = 1e-2, 
@@ -232,13 +232,13 @@ def PAdam_DIP_x(
         will be updated during the optimization process so this is a dynamic argument.
         Loss function should be on the form:
           l(delta = t_in, x_0 = Psi_theta(z_tilde), x = x) = ||Axhat - A(x+delta)|| - beta||xhat - x||
-    x0  : torch.Tensor
-        Initial condition for first step in two-step optimization process for finding adversarial noise for DIP.
-        Usually x_0 = Psi_theta(z_tilde) (output of the pre-trained DIP model)
     t_in : torch.Tensor
         The input tensor representing the adv. noise. This will be modified during
         optimization. The provided tensor serves as initial guess for the
         iterative optimization algorithm and will hold the result in the end.
+    xhat0  : torch.Tensor
+        Initial condition for first step in two-step optimization process for finding adversarial noise for DIP.
+        Usually x_0 = Psi_theta(z_tilde) (output of the pre-trained DIP model)
     projs : list or tuple of callables, optional
         The projections onto the feasible set to perform after each gradient
         descent step. They will be performed in the order given. (Default None)
@@ -266,7 +266,7 @@ def PAdam_DIP_x(
                t_in.data = t_tmp.data
         return t_tmp
     # clone and clear prev. computational graph of xhat
-    xhat = x0.clone().detach()
+    xhat = xhat0.clone().detach()
     xhat.requires_grad = True
     # init optimizer for reconstructed image xhat
     optimizer_xhat = torch.optim.Adam((xhat,), lr=stepsize, eps=1e-5)
@@ -280,6 +280,7 @@ def PAdam_DIP_x(
         t_in.requires_grad = False
         optimizer_xhat.zero_grad()
         # update the net parameters minimizing the DIP loss function
+        # TODO: implement _closure  s.t. loss function can handle both xhat and t_in as arguments
         xhat_loss = loss(t_in, xhat)
         xhat_loss.backward()
         # update dip net parameter
@@ -481,12 +482,25 @@ def untargeted_attack(
         t_out_ref = func(t_in_ref)
 
     # loss closure
-    def _closure(t_in):
+    def _closure(t_in, xhat = None, func = func, codomain_dist = codomain_dist):
+        if isinstance(func, partial):
+            if "xhat" in func.func.__code__.co_varnames:
+                func = partial(func, xhat = xhat) 
         # 1. Apply transform to perturbed measurment 
         # 2. Reconstruct image using func 
         t_out = func(transform(t_in))
+        # insert necessary variables for DIP
+        
+        if "adv_example" in codomain_dist.func.__code__.co_varnames:
+            # make a lambda function s.t. the only two arguments in the codomain_dist function 
+            # is xhat and x IN that order
+            new_cdd = codomain_dist
+            def codomain_dist(xhat,x,t_in=t_in): 
+                return new_cdd(t_in, xhat,x)
         # computing codomain distance between reconstructed t and reference output
         # i.e. rec. image from perturbed meas. xhat and GT image x0
+        # t_out     - reconstructed image
+        # t_out_rec - GT image
         loss = -weights[1] * codomain_dist(t_out, t_out_ref)
         if domain_dist is not None:
             loss += weights[0] * domain_dist(transform(t_in), t_in_ref)
@@ -496,14 +510,12 @@ def untargeted_attack(
             )
         return loss
 
-    # run optimization
+    # optimizer is a function on the form optimizer(loss_function, t_in, **kwargs)
     t_in_adv = optimizer(_closure, t_in_adv, **kwargs)
     return transform(t_in_adv)
 
 
 # ----- Grid attacks -----
-
-
 def err_measure_l2(x1, x2):
     """ L2 error wrapper function. """
     return l2_error(x1, x2, relative=True, squared=False)[1].squeeze()
@@ -514,7 +526,7 @@ def grid_attack(
     noise_rel   : torch.Tensor,
     X_0         : torch.Tensor, 
     Y_0         : torch.Tensor,
-    rec         : Callable = None,
+    #rec_config  : dict     = None,
     store_data  : bool     = False,
     keep_init   : int      = 0,
     err_measure : Callable = err_measure_l2,
@@ -533,7 +545,7 @@ def grid_attack(
     X_0 : torch.Tensor
         The reference signal.
     Y_0 : torch.Tensor
-        The reference measruements. Used to convert relative noise levels to
+        The reference measurements. Used to convert relative noise levels to
         absolute noise levels.
     store_data : bool, optional
         Store resulting adversarial examples. If set to False, only the
@@ -583,6 +595,12 @@ def grid_attack(
         Y_ref = torch.zeros(
             len(noise_rel), *Y_0.shape, device=torch.device("cpu")
         )
+    # for DIP networks we need to learn pre-trained network
+    if "DIP" in method.name:
+        z_tilde = 0.1 * torch.rand( (1, method.rec_config["net_in_channels"],) + X_0.shape[-2:] )
+        # note that Y0 is Y0.shape[0] identical samples
+        Xhat    = method.reconstr(y0 = Y_0[:1], net = method["net"], z_tilde = z_tilde)
+        method.rec_config["xhat0"] = Xhat.repeat( Y_0.shape[0], *((X_0.ndim -1) * (1,)) )
 
     for idx_noise in reversed(range(len(noise_rel))):
         # perform the actual attack for "method" and current noise level
@@ -592,19 +610,27 @@ def grid_attack(
             + "; Noise rel {}/{}".format(idx_noise + 1, len(noise_rel)),
             flush=True,
         )
+
+        # compute adversarial examples
         if (keep_init == 0) or (idx_noise == (len(noise_rel) - 1)):
             Y_adv_cur, Y_ref_cur, Y_0_cur = method.attacker(
-                X_0, noise_rel[idx_noise], yadv_init = None, rec = rec,
+                X_0, noise_rel[idx_noise], yadv_init = None, rec_config = method.rec_config,
             )
         else:
             Y_adv_cur, Y_ref_cur, Y_0_cur = method.attacker(
-                X_0, noise_rel[idx_noise], yadv_init=Y_adv_cur, rec = rec,
+                X_0, noise_rel[idx_noise], yadv_init = Y_adv_cur, rec_config = method.rec_config,
             )
 
+        # if DIP method net and z_tilde have to be added as an argument to the reconstruction function
+        if "DIP" in method.name:
+            assrt_msg = "z_tilde not an argument in the DIP reconstruction function (note diff. form adv. rec. func)"
+            assert "z_tilde" in method.reconstr.func.__code__.co_varnames, assrt_msg
+            #breakpoint()
+            method["reconstr"] = partial(method.reconstr, net = method["net"], z_tilde=z_tilde)
         # compute adversarial and reference reconstruction
         # (noise level needs to be absolute)
-        X_adv_cur = method.reconstr(Y_adv_cur, noise_rel[idx_noise])
-        X_ref_cur = method.reconstr(Y_ref_cur, noise_rel[idx_noise])
+        X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
+        X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
 
         # compute resulting reconstruction error according to err_measure
         X_adv_err[idx_noise, ...] = err_measure(X_adv_cur, X_0)
