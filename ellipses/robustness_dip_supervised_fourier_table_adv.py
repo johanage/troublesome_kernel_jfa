@@ -31,7 +31,7 @@ methods = methods.loc[methods_include]
 
 # select methods excluded from (re-)performing attacks
 methods_no_calc = [
-    "DIP UNet no jit",
+    #"DIP UNet no jit",
     "Supervised UNet no jit",
     #'L1',
     #"UNet it jit",

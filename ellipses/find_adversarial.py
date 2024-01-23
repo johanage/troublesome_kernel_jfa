@@ -599,6 +599,7 @@ def grid_attack(
     if "DIP" in method.name:
         z_tilde = 0.1 * torch.rand( (1, method.rec_config["net_in_channels"],) + X_0.shape[-2:] )
         # note that Y0 is Y0.shape[0] identical samples
+        breakpoint()
         Xhat    = method.reconstr(y0 = Y_0[:1], net = method["net"], z_tilde = z_tilde)
         method.rec_config["xhat0"] = Xhat.repeat( Y_0.shape[0], *((X_0.ndim -1) * (1,)) )
 
@@ -629,6 +630,7 @@ def grid_attack(
             method["reconstr"] = partial(method.reconstr, net = method["net"], z_tilde=z_tilde)
         # compute adversarial and reference reconstruction
         # (noise level needs to be absolute)
+        # DIP_x : this reconstructs the image xhat from measurements Y_adv_cur and Y_ref_cur
         X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
         X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
 

@@ -102,7 +102,7 @@ dir_train = os.path.join(config.DATA_PATH, "train")
 dir_val   = os.path.join(config.DATA_PATH, "val")
 # NOTE: both Vegard's and JFA's dirs does not contain test dir
 # Load one sample to train network on
-sample = torch.load(dir_train + "sample_00000.pt")
+sample = torch.load(os.path.join(dir_train,"sample_00000.pt"))
 # sample is real valued so make fake imaginary part
 sample = sample[None].repeat(2,1,1)
 # set imaginary values to zero

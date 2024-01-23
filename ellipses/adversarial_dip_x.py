@@ -44,11 +44,15 @@ if unet.device == torch.device("cpu"):
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
 
 # get train and validation data
-dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
-dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+#dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
+#dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+# JFA's local dir
+dir_train = os.path.join(config.DATA_PATH, "train")
+dir_val   = os.path.join(config.DATA_PATH, "val")
+# NOTE: both Vegard's and JFA's dirs does not contain test dir
 
 # same as DIP
-tar = torch.load(dir_train + "sample_00000.pt").to(device)
+tar = torch.load(os.path.join(dir_train,"sample_00000.pt")).to(device)
 tar_complex = to_complex(tar[None]).to(device)
 measurement = OpA(tar_complex).to(device)[None]
 
@@ -62,10 +66,10 @@ z_tilde = z_tilde.to(device)
 # load model weights
 param_dir = os.path.join(config.RESULTS_PATH, "DIP")
 file_param = "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
-params_loaded = torch.load(param_dir + file_param)
+params_loaded = torch.load( os.path.join(param_dir,file_param) )
 unet.load_state_dict(params_loaded)
 unet.eval()
-
+breakpoint()
 # Init adversarial noise setup
 from find_adversarial import PAdam_DIP_x
 from functools import partial

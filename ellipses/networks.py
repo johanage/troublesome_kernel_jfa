@@ -430,8 +430,12 @@ class UNet(InvNet):
         # add enc1
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
+        breakpoint()
         return self.outconv(dec1)
 
+    # TODO: add option to do upsampling with UpSampling and not just transpose convolution
+    # NOTE: according to Ulyanov et al. transpose convolutions give worse results than Upsampling, see https://github.com/DmitryUlyanov/deep-image-prior/blob/master/models/unet.py
+    
     @staticmethod
     def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.1):
         if act_func == "leakyrelu":

@@ -307,7 +307,7 @@ unet.eval()"""
 
 # optimization config for final reconstruction
 dip_nepochs             = 30000
-dip_optimizer_params    = {"lr": 5e-4, "eps": 2e-4, "weight_decay": 1e-4}
+dip_optimizer_params    = {"lr": 5e-4, "eps": 1e-8, "weight_decay": 0}
 dip_f_optimizer         = lambda net_params, opt_params=dip_optimizer_params : torch.optim.Adam(net_params, **opt_params)
 dip_lr_scheduler_params = {"step_size": dip_nepochs//100, "gamma": 0.96} 
 dip_f_lr_scheduler      = lambda optimizer, scheduler_params=dip_lr_scheduler_params : torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
@@ -342,14 +342,14 @@ _append_net(
     net = UNet(**dip_unet_params),
     adv_optim  = PAdam_DIP_x, #partial(PAdam_DIP_x, x0 = unet(z_tilde)),
     rec_config = {
-        "niter_adv_optim"         : 1000,
+        "niter_adv_optim"         : 1,#1000,
         "reconstruction_method"   : "DIP_x",
         "reconstruction_function" : partial(
             _reconstructDIP, 
             f_optimizer = dip_f_optimizer,
             f_scheduler = dip_f_lr_scheduler,
             OpA         = OpA,
-            epochs      = dip_nepochs,
+            epochs      = 10,#dip_nepochs,
         ),
         "rec_func_adv_noise" : lambda y, xhat : xhat,
         "codomain_distance"  : loss_adv_partial,
