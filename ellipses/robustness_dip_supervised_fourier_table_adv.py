@@ -232,7 +232,7 @@ if do_plot:
                 )
 
     plt.yticks(np.arange(0, 1, step=0.05))
-    #plt.ylim((-0.01, 0.36))
+    plt.ylim((-0.01, 0.36))
     #ax.set_xticks(ax.get_xticks().tolist()[1:-1])
     ax.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
     ax.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])

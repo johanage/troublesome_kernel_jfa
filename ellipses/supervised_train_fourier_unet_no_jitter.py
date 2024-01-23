@@ -5,14 +5,13 @@ UNet is implemented in networks.py.
 Terms
     - jitter, means that noise, typically Gaussian, is added to the data while training to reduce overfit
 """
-
-
+# load installed libs
 import os
-
 import matplotlib as mpl
 import torch
 import torchvision
-
+from torchvision.transforms import v2
+# from local scripts
 from data_management import IPDataset, SimulateMeasurements, ToComplex
 from networks import UNet
 from operators import Fourier as Fourier
@@ -78,31 +77,41 @@ def loss_func(pred, tar):
 
 
 train_phases = 2
+num_epochs = [100,10]
+lr_gamma = 0.96
 train_params = {
-    #"num_epochs": [100, 10], # fastmri, single-coil
-    "num_epochs" : [35,6],
+    "num_epochs": num_epochs, # fastmri, single-coil
+    #"num_epochs" : [35,6], # ellipses
     #"batch_size": [10, 10], # fastmri single-coil
     "batch_size": [10, 10], # ellipses
     "loss_func": loss_func,
     "save_path": [
         os.path.join(
             config.RESULTS_PATH,
-            "/supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
+            #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
+            "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256"
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
     ],
-    "save_epochs": 1,
+    "save_epochs": 10,
     "optimizer": torch.optim.Adam,
     "optimizer_params": [
-        {"lr": 5e-5, "eps": 2e-4, "weight_decay": 1e-4},
-        {"lr": 5e-5, "eps": 2e-4, "weight_decay": 1e-4},
+        {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
+        # start where phase 1 left off
+        {"lr": 1e-4*lr_gamma**num_epochs[0], "eps": 2e-4, "weight_decay": 1e-4},
     ],
     "scheduler": torch.optim.lr_scheduler.StepLR,
-    "scheduler_params": {"step_size": 1, "gamma": 1.0},
-    "acc_steps": [1, 200],
+    "scheduler_params": {"step_size": 1, "gamma": lr_gamma},
+    "acc_steps": [1, 1],#200],
     "train_transform": torchvision.transforms.Compose(
-        [ToComplex(), SimulateMeasurements(OpA)]
+        [
+            # flip first -> add imaginary part -> apply meas. operator
+            v2.RandomHorizontalFlip(p=0.5),
+            v2.RandomVerticalFlip(p=0.5),
+            ToComplex(), # adds an imaginary part with elements set to zero 
+            SimulateMeasurements(OpA), # simulate measurments with operator OpA - for MRI its the DFT
+        ]
     ),
     "val_transform": torchvision.transforms.Compose(
         [ToComplex(), SimulateMeasurements(OpA)],

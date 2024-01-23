@@ -37,20 +37,19 @@ if gpu_avail:
     torch.cuda.set_device(device)
 
 # ----- measurement configuration -----
-mask_func = RadialMaskFunc(config.n, 40)
-mask = mask_func((1,) + config.n + (1,))
-mask = mask.squeeze(-1)
-mask = mask.unsqueeze(1)
+#mask_func = RadialMaskFunc(config.n, 40)
+#mask = mask_func((1,) + config.n + (1,))
+#mask = mask.squeeze(-1)
+#mask = mask.unsqueeze(1)
 mask_fromfile = MaskFromFile(
     path = os.getcwd() + "/sampling_patterns/", 
     filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
 )
 # Fourier matrix
-#OpA_m = Fourier_m(mask)
-OpA_m = Fourier_m(mask_fromfile.mask[None])
+mask = mask_fromfile.mask[None]
+OpA_m = Fourier_m(mask)
 # Fourier operator
-#OpA = Fourier(mask)
-OpA = Fourier(mask_fromfile.mask[None])
+OpA = Fourier(mask)
 inverter = LearnableInverterFourier(config.n, mask, learnable=False)
 # set device for operators
 OpA_m.to(device)
@@ -74,7 +73,7 @@ def loss_func(pred, tar):
     )
 
 # set training parameters
-num_epochs = 20000
+num_epochs = 30000
 init_lr = 5e-4
 train_params = {
     "num_epochs": num_epochs,
@@ -95,8 +94,14 @@ if unet.device == torch.device("cpu"):
     unet = unet.to(device)
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
 # get train and validation data
-dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
-dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+# Vegard's scratch folder
+#dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
+#dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+# JFA's local dir
+dir_train = os.path.join(config.DATA_PATH, "train")
+dir_val   = os.path.join(config.DATA_PATH, "val")
+# NOTE: both Vegard's and JFA's dirs does not contain test dir
+# Load one sample to train network on
 sample = torch.load(dir_train + "sample_00000.pt")
 # sample is real valued so make fake imaginary part
 sample = sample[None].repeat(2,1,1)

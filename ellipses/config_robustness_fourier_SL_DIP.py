@@ -164,7 +164,7 @@ def _attackerNet(
         "weights"       : (1.0, 1.0, 1.0),
         "optimizer"     : adv_optim,
         "projs"         : None,
-        "niter"         : 1000,
+        "niter"         : rec_config["niter_adv_optim"],#1000,
         "stepsize"      : 1e-3,
     }
     # compute initialization
@@ -307,7 +307,7 @@ unet.eval()"""
 
 # optimization config for final reconstruction
 dip_nepochs             = 30000
-dip_optimizer_params    = {"lr": 5e-4, "eps": 1e-8, "weight_decay": 0}
+dip_optimizer_params    = {"lr": 5e-4, "eps": 2e-4, "weight_decay": 1e-4}
 dip_f_optimizer         = lambda net_params, opt_params=dip_optimizer_params : torch.optim.Adam(net_params, **opt_params)
 dip_lr_scheduler_params = {"step_size": dip_nepochs//100, "gamma": 0.96} 
 dip_f_lr_scheduler      = lambda optimizer, scheduler_params=dip_lr_scheduler_params : torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
@@ -326,12 +326,12 @@ _append_net(
         "name_save"     : "dip_unet_jit",
         "plt_color"     : "#3be383",
         "plt_marker"    : "o",
-        "plt_linestyle" : "--",
+        "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
-    """ This method does not need a pre-trained net.
-        The initial xhat, xhat0, will be computed before
-        iterating over the noise levels."""
+    # This method does not need a pre-trained net.
+    # The initial xhat, xhat0, will be computed before
+    #  iterating over the noise levels.
     #net = _load_net(
     #    f"{config.RESULTS_PATH}/DIP/"
     #    + "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt",
@@ -342,6 +342,7 @@ _append_net(
     net = UNet(**dip_unet_params),
     adv_optim  = PAdam_DIP_x, #partial(PAdam_DIP_x, x0 = unet(z_tilde)),
     rec_config = {
+        "niter_adv_optim"         : 1000,
         "reconstruction_method"   : "DIP_x",
         "reconstruction_function" : partial(
             _reconstructDIP, 
@@ -384,6 +385,7 @@ _append_net(
         supervised_unet_params,
     ),
     rec_config = {
+        "niter_adv_optim"         : 1000,
         "reconstruction_method"   : "Supervised",
         "reconstruction_function" : _reconstructNet,
         "rec_func_adv_noise"      : _reconstructNet,

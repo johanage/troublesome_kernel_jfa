@@ -254,6 +254,9 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
                     v_pred,
                     val_data,
                 )
+                t.set_postfix(
+                    **self._add_to_progress_bar({"val_rel_l2_err": logging["val_rel_l2_error"].values[-1] })
+                )
         self._on_train_end(save_path, logging)
         return logging
 

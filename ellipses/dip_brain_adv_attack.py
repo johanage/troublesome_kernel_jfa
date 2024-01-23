@@ -92,8 +92,13 @@ train_params = {
 }
 
 # get train and validation data
-dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
-dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+#dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
+#dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+# JFA's local dir
+dir_train = os.path.join(config.DATA_PATH, "train")
+dir_val   = os.path.join(config.DATA_PATH, "val")
+# NOTE: both Vegard's and JFA's dirs does not contain test dir
+
 sample = torch.load(dir_train + "sample_00000.pt")
 from operators import to_complex
 # go from real to complex valued sample - set imag part to zero
@@ -142,7 +147,7 @@ for epoch in range(train_params["num_epochs"]):
     optimizer.zero_grad()
     # add gaussian noise to DIP input according to Ulyanov et al 2020
     additive_noise = sigma_p*torch.randn(z_tilde.shape).to(device)
-    model_input = z_tilde + additive_noise
+    model_input    = z_tilde + additive_noise
     # get img = Re(sample), img_rec = Re(pred_img), pred_img = G(z_tilde, theta)
     img, img_rec, pred_img = get_img_rec(sample, model_input, model = unet)
     # pred = A G(z_tilde, theta)
