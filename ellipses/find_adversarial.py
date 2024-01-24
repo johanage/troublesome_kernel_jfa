@@ -1,24 +1,18 @@
-import torch
+import os, torch
 from tqdm import tqdm
 from operators import l2_error
 from typing import Callable, Optional, Tuple, List, Union, Type
-
-
+import config
 # ----- Variable Transforms -----
-
-
 def identity(x):
     return x
-
 
 def normalized_tanh(x, eps=1e-6):
     return (torch.tanh(x) + 1.0) / 2.0
 
-
 def normalized_atanh(x, eps=1e-6):
     x = x * (1 - eps) * 2 - 1
     return 0.5 * torch.log((1.0 + x) / (1.0 - x))
-
 
 # ----- Optimization Methods -----
 def PGD(
@@ -598,8 +592,9 @@ def grid_attack(
     # for DIP networks we need to learn pre-trained network
     if "DIP" in method.name:
         z_tilde = 0.1 * torch.rand( (1, method.rec_config["net_in_channels"],) + X_0.shape[-2:] )
+        # save initialised model weights to be loaded in each reconstruction at each noise level
+        torch.save(method["net"].state_dict(), os.path.join(config.RESULTS_PATH, "DIP_x_UNet_init_adv_table.pt") )
         # note that Y0 is Y0.shape[0] identical samples
-        breakpoint()
         Xhat    = method.reconstr(y0 = Y_0[:1], net = method["net"], z_tilde = z_tilde)
         method.rec_config["xhat0"] = Xhat.repeat( Y_0.shape[0], *((X_0.ndim -1) * (1,)) )
 
@@ -626,17 +621,21 @@ def grid_attack(
         if "DIP" in method.name:
             assrt_msg = "z_tilde not an argument in the DIP reconstruction function (note diff. form adv. rec. func)"
             assert "z_tilde" in method.reconstr.func.__code__.co_varnames, assrt_msg
-            #breakpoint()
+            # re-initialize model at zero noise level
+            params_init = torch.load(os.path.join(config.RESULTS_PATH, "DIP_x_UNet_init_adv_table.pt"))
+            method["net"].load_state_dict(params_init)
+            # update reconstruction function with re-initialised model and the same z_tilde as for every reconstruction
             method["reconstr"] = partial(method.reconstr, net = method["net"], z_tilde=z_tilde)
         # compute adversarial and reference reconstruction
         # (noise level needs to be absolute)
         # DIP_x : this reconstructs the image xhat from measurements Y_adv_cur and Y_ref_cur
         X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
         X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
-
+        
         # compute resulting reconstruction error according to err_measure
-        X_adv_err[idx_noise, ...] = err_measure(X_adv_cur, X_0)
-        X_ref_err[idx_noise, ...] = err_measure(X_ref_cur, X_0)
+        shape_x0_repeat = X_0.shape[:1] + (1,)*(X_0.ndim-1)
+        X_adv_err[idx_noise, ...] = err_measure(X_adv_cur.repeat(*shape_x0_repeat), X_0)
+        X_ref_err[idx_noise, ...] = err_measure(X_ref_cur.repeat(*shape_x0_repeat), X_0)
         print('X_adv_cur.shape: ', X_adv_cur.shape)
 
         if store_data:

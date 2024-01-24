@@ -1,18 +1,10 @@
-"""
-DESCRIPTION OF WHAT THIS SCRIPT DOES
-------------------------------------
-Terms
-    - jitter, means that noise, typically Gaussian, is added to the data while training to reduce overfit
-"""
-
-
+# python libs imports
 import os
-
 import matplotlib as mpl
 import torch
 import torchvision
 from piq import psnr, ssim
-
+# local imports
 from data_management import IPDataset, SimulateMeasurements, ToComplex
 from networks import UNet
 from operators import (
@@ -22,7 +14,6 @@ from operators import (
     RadialMaskFunc,
     MaskFromFile,
 )
-
 
 # ----- load configuration -----
 import config  # isort:skip
@@ -99,7 +90,7 @@ dir_train = os.path.join(config.DATA_PATH, "train")
 dir_val   = os.path.join(config.DATA_PATH, "val")
 # NOTE: both Vegard's and JFA's dirs does not contain test dir
 
-sample = torch.load(dir_train + "sample_00000.pt")
+sample = torch.load( os.path.join(dir_train,"sample_00000.pt") )
 from operators import to_complex
 # go from real to complex valued sample - set imag part to zero
 sample = to_complex(sample[None]).to(device)

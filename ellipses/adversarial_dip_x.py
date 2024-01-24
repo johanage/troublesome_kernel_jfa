@@ -81,9 +81,9 @@ from operators import proj_l2_ball
 from dip_utils import loss_adv_noise
 loss_adv_partial = partial(loss_adv_noise,  x = tar_complex, meas_op = OpA, beta = 1e-3)
 # init input optimizer (PGD or alternative methods like PAdam)
-adv_init_fac = 3
-noise_rel = 2e-3
-adv_noise_mag = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:]))
+adv_init_fac   = 3
+noise_rel      = 2e-3
+adv_noise_mag  = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:]))
 adv_noise_init = adv_noise_mag * torch.randn_like(measurement).to(device)
 adv_noise_init.requires_grad = True
 
@@ -111,7 +111,6 @@ adversarial_noise = PAdam_DIP_x(
 save_adv_noise = True
 """
 adversarial_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt")
-
 perturbed_measurement = measurement + adversarial_noise
 if save_adv_noise:
     torch.save(adversarial_noise, os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt")

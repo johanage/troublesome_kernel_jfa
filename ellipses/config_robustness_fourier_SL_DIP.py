@@ -342,14 +342,14 @@ _append_net(
     net = UNet(**dip_unet_params),
     adv_optim  = PAdam_DIP_x, #partial(PAdam_DIP_x, x0 = unet(z_tilde)),
     rec_config = {
-        "niter_adv_optim"         : 1,#1000,
+        "niter_adv_optim"         : 1000,
         "reconstruction_method"   : "DIP_x",
         "reconstruction_function" : partial(
             _reconstructDIP, 
             f_optimizer = dip_f_optimizer,
             f_scheduler = dip_f_lr_scheduler,
             OpA         = OpA,
-            epochs      = 10,#dip_nepochs,
+            epochs      = dip_nepochs,
         ),
         "rec_func_adv_noise" : lambda y, xhat : xhat,
         "codomain_distance"  : loss_adv_partial,

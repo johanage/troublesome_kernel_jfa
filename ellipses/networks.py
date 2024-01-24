@@ -430,7 +430,7 @@ class UNet(InvNet):
         # add enc1
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-        breakpoint()
+        #breakpoint() # to check shape of layers
         return self.outconv(dec1)
 
     # TODO: add option to do upsampling with UpSampling and not just transpose convolution
