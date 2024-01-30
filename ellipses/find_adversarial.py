@@ -485,12 +485,13 @@ def untargeted_attack(
         t_out = func(transform(t_in))
         # insert necessary variables for DIP
         
-        if "adv_example" in codomain_dist.func.__code__.co_varnames:
-            # make a lambda function s.t. the only two arguments in the codomain_dist function 
-            # is xhat and x IN that order
-            new_cdd = codomain_dist
-            def codomain_dist(xhat,x,t_in=t_in): 
-                return new_cdd(t_in, xhat,x)
+        if isinstance(codomain_dist, partial):
+            if "adv_example" in codomain_dist.func.__code__.co_varnames:
+                # make a lambda function s.t. the only two arguments in the codomain_dist function 
+                # is xhat and x IN that order
+                new_cdd = codomain_dist
+                def codomain_dist(xhat,x,t_in=t_in): 
+                    return new_cdd(t_in, xhat,x)
         # computing codomain distance between reconstructed t and reference output
         # i.e. rec. image from perturbed meas. xhat and GT image x0
         # t_out     - reconstructed image
@@ -630,10 +631,15 @@ def grid_attack(
         # (noise level needs to be absolute)
         # DIP_x : this reconstructs the image xhat from measurements Y_adv_cur and Y_ref_cur
         X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
+        # re-init net before reconstruction of reference measurement
+        if "DIP" in method.name:
+            method["net"].load_state_dict(params_init)
         X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
         
         # compute resulting reconstruction error according to err_measure
-        shape_x0_repeat = X_0.shape[:1] + (1,)*(X_0.ndim-1)
+        shape_x0_repeat = (1,)*(X_0.ndim)
+        if "DIP" in method.name:
+            shape_x0_repeat = X_0.shape[:1] + (1,)*(X_0.ndim-1)
         X_adv_err[idx_noise, ...] = err_measure(X_adv_cur.repeat(*shape_x0_repeat), X_0)
         X_ref_err[idx_noise, ...] = err_measure(X_ref_cur.repeat(*shape_x0_repeat), X_0)
         print('X_adv_cur.shape: ', X_adv_cur.shape)

@@ -1,15 +1,14 @@
+# python libs imports
 import os
-
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
-
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable as mal
 import pandas as pd
 import torch
-
 from tqdm import tqdm
-
+from typing import Type
+# local imports
 from operators import l2_error, to_complex
 
 
@@ -295,8 +294,19 @@ class UNet(InvNet):
     """
 
     def __init__(
-        self, in_channels=1, out_channels=1, base_features=32, drop_factor=0.0, inverter = None, operator = None,
+        self, 
+        in_channels   : int   = 1, 
+        out_channels  : int   = 1, 
+        base_features : int   = 32, 
+        drop_factor   : float = 0.0, 
+        inverter      : Type[torch.nn.Module] = None, 
+        operator      : Type[torch.nn.Module] = None,
+        upsampling    : str   = "upsample",
     ):
+        """
+        Args:
+        - upsampling : upsampling mode - either transpose convolutions or interpolation using nn.Upsampler
+        """
         # set properties of UNet
         super(UNet, self).__init__()
         self.inverter = inverter
@@ -344,9 +354,22 @@ class UNet(InvNet):
             block_name="bottleneck",
             device = self.device,
         )
+        if upsampling == "trans_conv":
+            mode_params = {
+                "in_channels"  : base_features * 16,
+                "out_channels" : base_features * 8,
+                "kernel_size"  : 2,
+                "stride"       : 2,
+            }
+        if upsampling in ["linear", "bilinear", "nearest", "bicubic", "trilinear"]: 
+            mode_params = {
+                "scale_factor"  : 2,
+            } 
         
-        self.upconv4 = torch.nn.ConvTranspose2d(
-            base_features * 16, base_features * 8, kernel_size=2, stride=2,
+        self.upconv4 = UNet._up_sample(
+            mode         = upsampling,
+            mode_params  = mode_params,
+            out_channels = base_features * 8,
         )
         self.upconv4.to(self.device)
         self.decoder4 = UNet._conv_block(
@@ -356,8 +379,12 @@ class UNet(InvNet):
             block_name="decoding_4",
             device = self.device,
         )
-        self.upconv3 = torch.nn.ConvTranspose2d(
-            base_features * 8, base_features * 4, kernel_size=2, stride=2
+        
+        if upsampling == "trans_conv": mode_params["in_channels"] = base_features * 8; mode_params["out_channels"] = base_features * 4;
+        self.upconv3 = UNet._up_sample(
+            mode         = upsampling, 
+            mode_params  = mode_params,
+            out_channels = base_features * 4,
         )
         self.upconv3.to(self.device)
         self.decoder3 = UNet._conv_block(
@@ -367,8 +394,12 @@ class UNet(InvNet):
             block_name="decoding_3",
             device = self.device,
         )
-        self.upconv2 = torch.nn.ConvTranspose2d(
-            base_features * 4, base_features * 2, kernel_size=2, stride=2
+        
+        if upsampling == "trans_conv": mode_params["in_channels"] = base_features * 4; mode_params["out_channels"] = base_features * 2;
+        self.upconv2 = UNet._up_sample(
+            mode         = upsampling, 
+            mode_params  = mode_params,
+            out_channels = base_features * 2,
         )
         self.upconv2.to(self.device)
         self.decoder2 = UNet._conv_block(
@@ -378,8 +409,12 @@ class UNet(InvNet):
             block_name="decoding_2",
             device = self.device,
         )
-        self.upconv1 = torch.nn.ConvTranspose2d(
-            base_features * 2, base_features, kernel_size=2, stride=2
+        
+        if upsampling == "trans_conv": mode_params["in_channels"] = base_features * 2; mode_params["out_channels"] = base_features;
+        self.upconv1 = UNet._up_sample(
+            mode         = upsampling, 
+            mode_params  = mode_params,
+            out_channels = base_features,
         )
         self.upconv1.to(self.device)
         self.decoder1 = UNet._conv_block(
@@ -430,12 +465,46 @@ class UNet(InvNet):
         # add enc1
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
-        #breakpoint() # to check shape of layers
         return self.outconv(dec1)
 
     # TODO: add option to do upsampling with UpSampling and not just transpose convolution
     # NOTE: according to Ulyanov et al. transpose convolutions give worse results than Upsampling, see https://github.com/DmitryUlyanov/deep-image-prior/blob/master/models/unet.py
-    
+    @staticmethod
+    def _up_sample(
+        mode         : str,
+        mode_params  : dict,
+        # for upsampling module
+        out_channels : int = None,
+        kernel_size  : int = 3,
+    ):
+        """
+        Upsampling layers, choice between:
+        - Transposed convolution
+        - Bilinear or nearest negihbour upsampling
+        """
+        if mode == "trans_conv":
+            return torch.nn.ConvTranspose2d(
+                **mode_params,
+                #mode_params["in_channels"], 
+                #mode_params["out_channels"], 
+                #kernel_size = mode_params["kernel_size"], 
+                #stride      = mode_params["stride"],
+            )
+        elif mode in ["linear", "bilinear", "nearest", "bicubic", "trilinear"]:
+            # Default : nearest
+            mode_params["mode"] = mode
+            upsampler = torch.nn.Upsample(
+                #size         = mode_params["size"],
+                #scale_factor = mode_params["scale_factor"],
+                #mode         = mode,
+                **mode_params
+            )
+            to_pad = int((kernel_size - 1) / 2)
+            conv = torch.nn.Conv2d(2*out_channels, out_channels, kernel_size = kernel_size, padding = to_pad)
+            return torch.nn.Sequential(*[upsampler, conv])
+
+        else: return ValueError("Mode %s not found in system"%mode)
+
     @staticmethod
     def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.1):
         if act_func == "leakyrelu":

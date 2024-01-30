@@ -275,17 +275,17 @@ class Jitter(object):
     """
 
     def __init__(self, eta, scale_lo, scale_hi, n_seed=None, t_seed=None):
-        self.eta = eta
+        self.eta      = eta
         self.scale_lo = scale_lo
         self.scale_hi = scale_hi
-        self.rng = np.random.RandomState(n_seed)
-        self.trng = torch.Generator()
+        self.rng      = np.random.RandomState(n_seed)
+        self.trng     = torch.Generator()
         if t_seed is not None:
             self.trng.manual_seed(t_seed)
 
     def __call__(self, inputs):
         meas, target = inputs
-        m = meas.shape[-1]  # number of sampled measurements
+        m     = meas.shape[-1]  # number of sampled measurements
         scale = (
             self.scale_lo + (self.scale_hi - self.scale_lo) * self.rng.rand()
         )

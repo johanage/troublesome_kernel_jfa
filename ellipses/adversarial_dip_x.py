@@ -98,18 +98,18 @@ projection_l2 = partial(proj_l2_ball, radius = radius, centre = centre)
 
 # perform PAdam - uses the ADAM optimizer instead of GD and excludes the backtracking line search
 save_adv_noise = False
-"""
+#"""
 adversarial_noise = PAdam_DIP_x(
     loss          = loss_adv_partial,
     xhat0         = unet(z_tilde), 
     t_in          = adv_noise_init,
     projs         = [projection_l2],
-    niter         = 10000,
+    niter         = 1000,
     stepsize      = 1e-4,
     silent        = False,
 )
 save_adv_noise = True
-"""
+#"""
 adversarial_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt")
 perturbed_measurement = measurement + adversarial_noise
 if save_adv_noise:

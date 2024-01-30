@@ -1,3 +1,10 @@
+"""
+Training script for supervised learning using a UNet.
+UNet is implemented in networks.py.
+-----------------------------------------------------
+Terms
+    - jitter, means that noise, typically Gaussian, is added to the data while training to reduce overfit
+"""
 # load installed libs
 import os
 import matplotlib as mpl
@@ -5,7 +12,7 @@ import torch
 import torchvision
 from torchvision.transforms import v2
 # from local scripts
-from data_management import IPDataset, SimulateMeasurements, ToComplex
+from data_management import IPDataset, SimulateMeasurements, ToComplex, Jitter
 from networks import UNet
 from operators import Fourier as Fourier
 from operators import Fourier_matrix as Fourier_m
@@ -73,6 +80,7 @@ def loss_func(pred, tar):
 train_phases = 2
 num_epochs = [100,10]
 lr_gamma = 0.96
+jitter_params = {"eta" : 1e-1, "scale_lo" : 0.0, "scale_hi" : 1.0}
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
     #"num_epochs" : [35,6], # ellipses
@@ -83,8 +91,10 @@ train_params = {
         os.path.join(
             config.RESULTS_PATH,
             #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
-            "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256"
-            "train_phase_{}".format((i + 1) % (train_phases + 1)),
+            "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256"
+            "eta_{eta:0.3f}_train_phase_{train_phase}".format(
+                eta = jitter_params["eta"],
+                train_phase = (i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
     ],
@@ -105,6 +115,8 @@ train_params = {
             v2.RandomVerticalFlip(p=0.5),
             ToComplex(), # adds an imaginary part with elements set to zero 
             SimulateMeasurements(OpA), # simulate measurments with operator OpA - for MRI its the DFT
+            # add jitter
+            Jitter(**jitter_params),
         ]
     ),
     "val_transform": torchvision.transforms.Compose(
@@ -146,8 +158,8 @@ unet = unet(**unet_params)
 # start from previously trained network
 """
 root = ""
-param_dir = "/models/Fourier_UNet_it_no_jitter_train_phase_1/"
-file_param = "model_weights_epoch23.pt"
+param_dir = "/models/Fourier_UNet_it_jitter_train_phase_2/"
+file_param = "model_weights.pt"
 params_loaded = torch.load(root + param_dir + file_param)
 unet.load_state_dict(params_loaded)
 """

@@ -21,6 +21,8 @@ methods = cfg_rob.methods
 methods_include = [
     "DIP UNet no jit",
     "Supervised UNet no jit",
+    "Supervised UNet jit",
+    "Supervised UNet jit low noise",
     #'L1',
     #"UNet it no jit",
     #"UNet it jit mod",
@@ -31,8 +33,10 @@ methods = methods.loc[methods_include]
 
 # select methods excluded from (re-)performing attacks
 methods_no_calc = [
-    #"DIP UNet no jit",
+    "DIP UNet no jit",
     "Supervised UNet no jit",
+    "Supervised UNet jit",
+    "Supervised UNet jit low noise",
     #'L1',
     #"UNet it jit",
     #"UNet it no jit",
@@ -221,7 +225,7 @@ if do_plot:
                 color     = method["info"]["plt_color"],
                 label     = method["info"]["name_disp"],
             )
-            fill_between_methods = ("L1", "UNet it jit mod", "UNet it jit", "UNet it no jit", "DIP UNet no jit", "Supervised UNet no jit")
+            fill_between_methods = ("L1", "UNet it jit mod", "UNet it jit", "UNet it no jit", "DIP UNet no jit", "Supervised UNet no jit", "Supervised UNet jit", "Supervised UNet jit low noise")
             if idx in fill_between_methods:
                 plt.fill_between(
                     noise_rel,

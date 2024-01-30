@@ -275,6 +275,12 @@ def _append_net(
         }
     else:
         rec = rec_config["reconstruction_function"]
+        #if isinstance(rec, partial):
+        #    if "net" in rec.func.__code__.co_varnames:
+        #        rec = partial(rec, net = net) 
+        if isinstance(rec, Callable) and not isinstance(rec, partial):
+            if "net" in rec.__code__.co_varnames:
+                rec = partial(rec, net=net)
     methods.loc[name] = {
         "info"       : info,
         "reconstr"   : rec,
@@ -292,18 +298,12 @@ dip_unet_params = {
     "base_features" : 32,
     "out_channels"  : 2,
     "operator"      : OpA_m,
-    "inverter"      : None, 
+    "inverter"      : None,
+    "upsampling"    : "nearest",
 }
 # initialize model used for initial condition
 unet = UNet(**dip_unet_params)
 unet.to(device)
-
-# load model weights
-"""param_dir = os.getcwd() + "/models/DIP/"
-file_param = "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
-params_loaded = torch.load(param_dir + file_param)
-unet.load_state_dict(params_loaded)
-unet.eval()"""
 
 # optimization config for final reconstruction
 dip_nepochs             = 30000
@@ -367,19 +367,86 @@ supervised_unet_params = {
     "out_channels"  : 2,
     "operator"      : OpA_m,
     "inverter"      : inverter,
+    "upsampling"    : "nearest",#trans_conv",
 }
+
+# without jittering
 _append_net(
     "Supervised UNet no jit",
     {
         "name_disp"     : "Supervised UNet w/o noise",
         "name_save"     : "unet_no_jit",
         "plt_color"     : "#023eff",
-        "plt_marker"    : "x",
+        "plt_marker"    : "d",
         "plt_linestyle" : "--",
         "plt_linewidth" : 2.75,
     },
     _load_net(
         f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+        + "model_weights.pt",
+        UNet,
+        supervised_unet_params,
+    ),
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "Supervised",
+        "reconstruction_function" : _reconstructNet,
+        "rec_func_adv_noise"      : _reconstructNet,
+        "codomain_distance"       : _complexloss,
+
+    }
+)
+supervised_unet_params = {
+    "in_channels"   : 2,
+    "drop_factor"   : 0.0,
+    "base_features" : 32,
+    "out_channels"  : 2,
+    "operator"      : OpA_m,
+    "inverter"      : inverter,
+    "upsampling"    : "nearest",
+}
+# with jittering
+
+# jittering level p=10
+_append_net(
+    "Supervised UNet jit",
+    {
+        "name_disp"     : "Supervised UNet w/ noise",
+        "name_save"     : "unet_jit",
+        "plt_color"     : "#eb6152",
+        "plt_marker"    : "s",
+        "plt_linestyle" : "--",
+        "plt_linewidth" : 2.75,
+    },
+    _load_net(
+        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_10.000_train_phase_2/"
+        + "model_weights.pt",
+        UNet,
+        supervised_unet_params,
+    ),
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "Supervised",
+        "reconstruction_function" : _reconstructNet,
+        "rec_func_adv_noise"      : _reconstructNet,
+        "codomain_distance"       : _complexloss,
+
+    }
+)
+
+# jittering level p=1/10
+_append_net(
+    "Supervised UNet jit low noise",
+    {
+        "name_disp"     : "Supervised UNet w/ low noise",
+        "name_save"     : "unet_jit_low_noise",
+        "plt_color"     : "#eb79a8",
+        "plt_marker"    : "x",
+        "plt_linestyle" : "--",
+        "plt_linewidth" : 2.75,
+    },
+    _load_net(
+        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,

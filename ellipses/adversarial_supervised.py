@@ -103,8 +103,7 @@ adversarial_noise = PAdam(
     stepsize    = 1e-4,
     silent      = False,
 )
-
-
+# establish perturbed measurments and rec. images
 perturbed_measurements = measurement + adversarial_noise
 perturbed_targets = unet.forward(perturbed_measurements)
 perturbed_images  = (perturbed_targets[:,0]**2 + perturbed_targets[:,1]**2)**.5
