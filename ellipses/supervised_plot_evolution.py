@@ -37,24 +37,39 @@ unet_params = {
     "out_channels"  : 2,
     "operator"      : OpA_m,
     "inverter"      : inverter,
+    "upsampling"    : "nearest",
 }
 unet = UNet
 unet = unet(**unet_params)
-param_dir_phase1 = os.getcwd() + "/models/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_1/"
-param_dir_phase2 = os.getcwd() + "/models/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+#param_dir_phase1 = os.path.join(config.RESULTS_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_1/"
+param_dir_phase1 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_1/")
+#param_dir_phase2 = os.path.join(config.RESULTS_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+param_dir_phase2 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_2/")
 
 # get train and validation data
-dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
-dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+data_dir = config.DATA_PATH
+dir_train = os.path.join(data_dir, "train")
+#"/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
+dir_val = os.path.join(data_dir, "val")
+#"/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 # same as DIP
-v_tar = torch.load(dir_val + "sample_00000.pt").to(device)
+v_tar = torch.load(os.path.join(dir_val,"sample_0.pt")).to(device)
 v_tar_complex = to_complex(v_tar[None]).to(device)
 measurement = OpA(v_tar_complex).to(device)[None]
+
+# load final net
+#file_param = "model_weights.pt"
+#params_loaded = torch.load(param_dir_phase2 + file_param)
+#unet.load_state_dict(params_loaded)
+# rec image
+#imrec_final = unet.forward(measurement)
+#breakpoint()
 
 # plot stuff
 cmap = "Greys_r"
 isave = 0
 fn_evolution = "supervised_evolution_circ_sr0.25"
+plot_dir = os.path.join(config.RESULTS_PATH, "../plots/supervised")
 fig_evo, axs_evo = plt.subplots(2,10,figsize=(50,10) )
 [ax.set_axis_off() for ax in axs_evo.flatten()]
 
@@ -75,17 +90,17 @@ for indices, param_dir in zip([ [0,6,12,15,18,24,30,35], [3, 6]], [param_dir_pha
         axs_evo[1,isave].imshow(imres, cmap=cmap)
         isave +=1
 fig_evo.tight_layout()
-fig_evo.savefig(os.getcwd() + "/plots/supervised/" + fn_evolution + ".png", bbox_inches="tight")
+fig_evo.savefig(os.path.join(plot_dir, fn_evolution + ".png"), bbox_inches="tight")
 
 # load final net
 file_param = "model_weights.pt"
 params_loaded = torch.load(param_dir + file_param)
 unet.load_state_dict(params_loaded)
 # rec image
-imrec_final = unet.forward(measurement)
+imrec_final = unet.forward(measurement).norm(p=2,dim=(0,1))
 # plot and save final reconstruction 
-plt.figure(); plt.imshow(imrec_final, cmap=cmap)
-plt.savefig(os.getcwd() + "/plots/supervised/supervised_final_rec_circ_sr0.25.png")
+plt.figure(); plt.imshow(imrec_final.detach().cpu(), cmap=cmap); plt.axis("off")
+plt.savefig(os.path.join(plot_dir, "supervised_final_rec_circ_sr0.25.png"), bbox_inches="tight")
 # and original image
-plt.figure(); plt.imshow(v_tar, cmap=cmap)
-plt.savefig(os.getcwd() + "/plots/supervised/supervised_orig_sample.png")
+plt.figure(); plt.imshow(v_tar.cpu(), cmap=cmap); plt.axis("off")
+plt.savefig(os.path.join(plot_dir, "supervised_orig_sample.png"), bbox_inches="tight")

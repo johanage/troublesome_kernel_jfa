@@ -437,7 +437,7 @@ def untargeted_attack(
         The function f. For image reconstruction it's the function that
         reconstructs the image.
         Supervised : Psi_theta(y)
-        DIP        : ||Axhat - A(x+delta)|| - beta * ||xhat -||Axhat - A(x+delta)|| - beta * ||xhat - x||
+        DIP        : Psi_theta(z_tilde) for theta = argmin_theta ||A Psi_theta(z_tilde) - y ||_2^2 
     t_in_adv : torch.Tensor
         The adversarial input tensor. This will be modified during
         optimization. The provided tensor serves as initial guess for the

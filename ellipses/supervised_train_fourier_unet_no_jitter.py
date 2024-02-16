@@ -71,24 +71,24 @@ def loss_func(pred, tar):
 
 
 train_phases = 2
-num_epochs = [100,10]
+num_epochs = [1000, 200]
 lr_gamma = 0.96
 train_params = {
-    "num_epochs": num_epochs, # fastmri, single-coil
-    #"num_epochs" : [35,6], # ellipses
-    #"batch_size": [10, 10], # fastmri single-coil
-    "batch_size": [10, 10], # ellipses
+    #"num_epochs": num_epochs, # fastmri, single-coil
+    "num_epochs" : [35,6], # ellipses
+    "batch_size": [10, 10], 
     "loss_func": loss_func,
     "save_path": [
         os.path.join(
-            config.RESULTS_PATH,
-            #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
-            "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256"
+            #config.RESULTS_PATH, # fastMRI data
+            config.SCRATCH_PATH, # ellipses 
+            "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
+            #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256"
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
     ],
-    "save_epochs": 10,
+    "save_epochs": 1,
     "optimizer": torch.optim.Adam,
     "optimizer_params": [
         {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
@@ -145,10 +145,9 @@ unet = unet(**unet_params)
 
 # start from previously trained network
 """
-root = ""
-param_dir = "/models/Fourier_UNet_it_no_jitter_train_phase_1/"
-file_param = "model_weights_epoch23.pt"
-params_loaded = torch.load(root + param_dir + file_param)
+param_dir = "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+file_param = "model_weights.pt"
+params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir, file_param) )
 unet.load_state_dict(params_loaded)
 """
 
@@ -162,6 +161,13 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # measurement y has shape (2, m) since y in C^m
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
+
+# test network reconstruction 
+#tar = val_data[0][0]
+#measurement = OpA(tar)
+#rec = unet(measurement[None].to(device))
+#assert 0
+
 # run training 
 for i in range(train_phases):
     train_params_cur = {}
@@ -169,13 +175,6 @@ for i in range(train_phases):
         train_params_cur[key] = (
             value[i] if isinstance(value, (tuple, list)) else value
         )
-    if i == 0:
-        # Make sure the filename corresponds to sample pattern!!!
-        #train_params_cur["fn_evolution"] = "sr_0.25_brain256_evolution"
-        train_params_cur["fn_evolution"] = "sr_0.25_ellipses256_evolution"
-        train_params_cur["plot_evolution"] = True
-    else:
-         train_params_cur["plot_evolution"] = False
     print("Phase {}:".format(i + 1))
     for key, value in train_params_cur.items():
         print(key + ": " + str(value))

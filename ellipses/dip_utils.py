@@ -5,6 +5,8 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable as mal
 import os
 # type checking arguments in function# type checking arguments in functions
 from typing import Union, Type, Callable, Generator
+# from local libs
+from data_management import Jitter
 
 # ----- global configuration -----
 device = torch.device("cpu")
@@ -44,7 +46,7 @@ def plot_train_DIP(
     
     # savefig
     fig.tight_layout()
-    fig.savefig(os.getcwd() + "/" +  save_fn, bbox_inches = "tight")
+    fig.savefig(save_fn, bbox_inches = "tight")
 
 def get_img_rec(sample, z_tilde, model):
     img = torch.sqrt(sample[0]**2 + sample[1]**2).to("cpu")
@@ -105,6 +107,32 @@ def loss_adv_example(
     recerr = xhat - x
     return (yhat - y_perturbed).pow(2).sum() - beta * recerr.pow(2).sum()
 
+def loss_adv_example_white_box(
+    adv_noise   : torch.Tensor,
+    xhat        : torch.Tensor,
+    x           : torch.Tensor,
+    meas_op     : operators.Fourier,
+    beta        : float,
+) -> torch.Tensor:
+    """
+    Loss function used in the first step to acquire the adversarial noise.
+       l_adv = ||A xhat - y_adv||_2^2 - beta * || x - xhat||_2^2
+    
+    Args:
+    - adv_noise   : adversarial noise for image (therefore white box suffix on method function)
+    - xhat        : reconstructed image
+    - x           : ground truth image
+    - meas_op     : measurement operator A
+    - beta        : parameter of penalizing closeness between orig. image x and reconstructed image xhat
+    Out:
+    - l_adv as written above
+    """
+    yhat = meas_op(xhat)
+    y_perturbed = meas_op(x + adv_noise)
+    recerr = xhat - x
+    return (yhat - y_perturbed).pow(2).sum() - beta * recerr.pow(2).sum()
+
+
 from tqdm import tqdm
 mseloss = torch.nn.MSELoss(reduction="sum")
 
@@ -112,28 +140,30 @@ def loss_func(pred, tar):
     return mseloss(pred, tar) / pred.shape[0]
 
 def _reconstructDIP(
-    y0          : torch.Tensor,
-    net         : Type[torch.nn.Module],
-    f_optimizer : Callable[Generator, Type[torch.optim.Optimizer]],
-    f_scheduler : Callable[Type[torch.optim.Optimizer], Type[torch.optim.lr_scheduler.LRScheduler]],
-    z_tilde     : torch.Tensor,
-    OpA         : Union[operators.Fourier, torch.Tensor],
-    epochs      : int,
-    loss_func   : Callable = loss_func,
-    sigma_p     : float    = 1/30,
+    y0           : torch.Tensor,
+    net          : Type[torch.nn.Module],
+    f_optimizer  : Callable[Generator, Type[torch.optim.Optimizer]],
+    f_scheduler  : Callable[Type[torch.optim.Optimizer], Type[torch.optim.lr_scheduler.LRScheduler]],
+    z_tilde      : torch.Tensor,
+    OpA          : Union[operators.Fourier, torch.Tensor],
+    epochs       : int,
+    loss_func    : Callable = loss_func,
+    sigma_p      : float    = 1/30,
+    jitter_level : float    = 0.0,
 ) -> torch.Tensor:
     """
     DIP reconstruction algorithm.
     Args:
-    - y0          : The noiseless measurements
-    - net         : DIP network
-    - f_optimizer : Function with predetermined optimization params
-                    that takes net parameters as input. 
-    - f_scheudler : Function with predetermined lr scheduler params
-                    that takes optimizer object as input.
-    - z_tilde     : The fixed random input vector of the DIP net, 
-                    this is decoded to an image.
-    - sigma_p     : DIP uses jittering, magnitude of Gaussian jittering noise.
+    - y0           : The noiseless measurements
+    - net          : DIP network
+    - f_optimizer  : Function with predetermined optimization params
+                     that takes net parameters as input. 
+    - f_scheudler  : Function with predetermined lr scheduler params
+                     that takes optimizer object as input.
+    - z_tilde      : The fixed random input vector of the DIP net, 
+                     this is decoded to an image.
+    - sigma_p      : DIP uses jittering, magnitude of Gaussian jittering noise.
+    - jitter_level : jitter level as described in appendix A.3 in Troublesome kernel paper: https://arxiv.org/abs/2001.01258 
     """
     # set device for net and z_tilde
     net.to(device); z_tilde = z_tilde.to(device)
@@ -149,6 +179,12 @@ def _reconstructDIP(
         desc="Train DIP ",
         total=epochs,
     )
+    # jittering setup
+    if jitter_level > 0:
+        x0_dummy = None#torch.zero_like(net.forward(z_tilde))
+        jit_params = {"eta" : jitter_level,  "scale_lo" : 0.0, "scale_hi" : 1.0}
+        Jitter_trans = Jitter(**jit_params)
+        measurement, x0_dummy = Jitter_trans( (y0, x0_dummy) )
 
     for epoch in range(epochs):
         # set gradients to zero

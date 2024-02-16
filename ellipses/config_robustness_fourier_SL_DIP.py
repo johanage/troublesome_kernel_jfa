@@ -1,7 +1,6 @@
 # Robustness test configuration for
-# - Supervised learning
+# - Supervised learning: wiht and without jitter
 # - Deep image prior - serving as untrained network/ unsupervised method
-
 import os
 from typing import Tuple, Type, Callable
 from functools import partial
@@ -301,9 +300,6 @@ dip_unet_params = {
     "inverter"      : None,
     "upsampling"    : "nearest",
 }
-# initialize model used for initial condition
-unet = UNet(**dip_unet_params)
-unet.to(device)
 
 # optimization config for final reconstruction
 dip_nepochs             = 30000
@@ -312,35 +308,20 @@ dip_f_optimizer         = lambda net_params, opt_params=dip_optimizer_params : t
 dip_lr_scheduler_params = {"step_size": dip_nepochs//100, "gamma": 0.96} 
 dip_f_lr_scheduler      = lambda optimizer, scheduler_params=dip_lr_scheduler_params : torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
 
-dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
-
-# same as DIP
-from operators import to_complex
-z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt").to(device)
-
 from functools import partial
+# DIP no jitter max number of epochs/iterations
 _append_net(
     name = "DIP UNet no jit",
     info = {
         "name_disp"     : "DIP UNet w/o noise",
-        "name_save"     : "dip_unet_jit",
+        "name_save"     : "dip_unet_nojit_3_3",
         "plt_color"     : "#3be383",
         "plt_marker"    : "o",
         "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
-    # This method does not need a pre-trained net.
-    # The initial xhat, xhat0, will be computed before
-    #  iterating over the noise levels.
-    #net = _load_net(
-    #    f"{config.RESULTS_PATH}/DIP/"
-    #    + "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt",
-    #    UNet,
-    #    dip_unet_params,
-    #),
-    # init net because reconstruction algo is per sample basis
     net = UNet(**dip_unet_params),
-    adv_optim  = PAdam_DIP_x, #partial(PAdam_DIP_x, x0 = unet(z_tilde)),
+    adv_optim  = PAdam_DIP_x, 
     rec_config = {
         "niter_adv_optim"         : 1000,
         "reconstruction_method"   : "DIP_x",
@@ -358,7 +339,100 @@ _append_net(
         "save_ztilde"        : True,
     }
 )
+# DIP no jitter 2/3 of max epochs/iterations
+_append_net(
+    name = "DIP UNet no jit 2/3 iterations",
+    info = {
+        "name_disp"     : "DIP UNet 2/3",
+        "name_save"     : "dip_unet_nojit_2_3",
+        "plt_color"     : "#3be340",
+        "plt_marker"    : "o",
+        "plt_linestyle" : "-",
+        "plt_linewidth" : 2.75,
+    },
+    net = UNet(**dip_unet_params),
+    adv_optim  = PAdam_DIP_x,
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "DIP_x",
+        "reconstruction_function" : partial(
+            _reconstructDIP,
+            f_optimizer = dip_f_optimizer,
+            f_scheduler = dip_f_lr_scheduler,
+            OpA         = OpA,
+            epochs      = 2*(dip_nepochs//3),
+        ),
+        "rec_func_adv_noise" : lambda y, xhat : xhat,
+        "codomain_distance"  : loss_adv_partial,
+        "batch_size"         : 1,
+        "net_in_channels"    : dip_unet_params["in_channels"],
+        "save_ztilde"        : True,
+    }
+)
 
+# DIP no jitter 1/3 of max epochs/iterations
+_append_net(
+    name = "DIP UNet no jit 1/3 iterations",
+    info = {
+        "name_disp"     : "DIP UNet 1/3",
+        "name_save"     : "dip_unet_nojit_1_3",
+        "plt_color"     : "#9bf22a",
+        "plt_marker"    : "o",
+        "plt_linestyle" : "-",
+        "plt_linewidth" : 2.75,
+    },
+    net = UNet(**dip_unet_params),
+    adv_optim  = PAdam_DIP_x,
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "DIP_x",
+        "reconstruction_function" : partial(
+            _reconstructDIP,
+            f_optimizer = dip_f_optimizer,
+            f_scheduler = dip_f_lr_scheduler,
+            OpA         = OpA,
+            epochs      = dip_nepochs//3,
+        ),
+        "rec_func_adv_noise" : lambda y, xhat : xhat,
+        "codomain_distance"  : loss_adv_partial,
+        "batch_size"         : 1,
+        "net_in_channels"    : dip_unet_params["in_channels"],
+        "save_ztilde"        : True,
+    }
+)
+
+
+# DIP jitter
+_append_net(
+    name = "DIP UNet jit",
+    info = {
+        "name_disp"     : "DIP UNet w/ noise",
+        "name_save"     : "dip_unet_jit_plus_jit_meas",
+        "plt_color"     : "#0cad2b",
+        "plt_marker"    : "p",
+        "plt_linestyle" : "-",
+        "plt_linewidth" : 2.75,
+    },
+    net = UNet(**dip_unet_params),
+    adv_optim  = PAdam_DIP_x, 
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "DIP_x",
+        "reconstruction_function" : partial(
+            _reconstructDIP, 
+            f_optimizer  = dip_f_optimizer,
+            f_scheduler  = dip_f_lr_scheduler,
+            OpA          = OpA,
+            epochs       = dip_nepochs,
+            jitter_level = 10,
+        ),
+        "rec_func_adv_noise" : lambda y, xhat : xhat,
+        "codomain_distance"  : loss_adv_partial,
+        "batch_size"         : 1,
+        "net_in_channels"    : dip_unet_params["in_channels"],
+        "save_ztilde"        : True,
+    }
+)
 # ----- Supervised UNet configuration -----
 supervised_unet_params = {
     "in_channels"   : 2,
@@ -367,7 +441,7 @@ supervised_unet_params = {
     "out_channels"  : 2,
     "operator"      : OpA_m,
     "inverter"      : inverter,
-    "upsampling"    : "nearest",#trans_conv",
+    "upsampling"    : "nearest"
 }
 
 # without jittering
@@ -407,11 +481,38 @@ supervised_unet_params = {
 }
 # with jittering
 
+# jittering level p=100
+_append_net(
+    "Supervised UNet jit very high noise",
+    {
+        "name_disp"     : "Supervised UNet w/ very high noise",
+        "name_save"     : "unet_jit",
+        "plt_color"     : "#f22a86",
+        "plt_marker"    : "s",
+        "plt_linestyle" : "--",
+        "plt_linewidth" : 2.75,
+    },
+    _load_net(
+        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_100.000_train_phase_2/"
+        + "model_weights.pt",
+        UNet,
+        supervised_unet_params,
+    ),
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "Supervised",
+        "reconstruction_function" : _reconstructNet,
+        "rec_func_adv_noise"      : _reconstructNet,
+        "codomain_distance"       : _complexloss,
+
+    }
+)
+
 # jittering level p=10
 _append_net(
     "Supervised UNet jit",
     {
-        "name_disp"     : "Supervised UNet w/ noise",
+        "name_disp"     : "Supervised UNet w/ high noise",
         "name_save"     : "unet_jit",
         "plt_color"     : "#eb6152",
         "plt_marker"    : "s",
@@ -447,6 +548,33 @@ _append_net(
     },
     _load_net(
         f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
+        + "model_weights.pt",
+        UNet,
+        supervised_unet_params,
+    ),
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "Supervised",
+        "reconstruction_function" : _reconstructNet,
+        "rec_func_adv_noise"      : _reconstructNet,
+        "codomain_distance"       : _complexloss,
+
+    }
+)
+
+# jittering mod: phase 1: p=10, phase 2: p=0 
+_append_net(
+    "Supervised UNet jit mod",
+    {
+        "name_disp"     : "Supervised UNet w/ noise mod",
+        "name_save"     : "unet_jit_mod",
+        "plt_color"     : "#dbe14c",
+        "plt_marker"    : "+",
+        "plt_linestyle" : "--",
+        "plt_linewidth" : 2.75,
+    },
+    _load_net(
+        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256eta_10.000_train_phase_2/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,

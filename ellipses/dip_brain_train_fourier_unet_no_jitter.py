@@ -1,20 +1,12 @@
-"""
-DESCRIPTION OF WHAT THIS SCRIPT DOES
-------------------------------------
-Terms
-    - jitter, means that noise, typically Gaussian, is added to the data while training to reduce overfit
-"""
-
-
+# general imports
 import os
-
 import matplotlib as mpl
 import torch
 import torchvision
 from piq import psnr, ssim
-
+# local imports
 from data_management import IPDataset, SimulateMeasurements, ToComplex
-from networks import UNet
+from networks import UNet, local_lipshitz
 from operators import (
     Fourier,
     Fourier_matrix as Fourier_m,
@@ -22,7 +14,6 @@ from operators import (
     RadialMaskFunc,
     MaskFromFile,
 )
-
 
 # ----- load configuration -----
 import config  # isort:skip
@@ -62,7 +53,8 @@ unet_params = {
     "base_features" : 32,
     "out_channels"  : 2,
     "operator"      : OpA_m,
-    "inverter"      : None, #inverter,
+    "inverter"      : None,
+    "upsampling"    : "nearest",
 }
 unet = UNet
 # ----- training configuration -----
@@ -73,23 +65,36 @@ def loss_func(pred, tar):
     )
 
 # set training parameters
-num_epochs = 30000
+num_epochs = 50000
 init_lr = 5e-4
 train_params = {
     "num_epochs": num_epochs,
     "batch_size": 1,
     "loss_func": loss_func,
     "save_path": os.path.join(config.RESULTS_PATH,"DIP"),
-    "save_epochs": num_epochs//10,
+    "save_epochs": num_epochs//100,
     #"optimizer": torch.optim.Adam,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
     #"scheduler": torch.optim.lr_scheduler.StepLR,
-    "scheduler_params": {"step_size": num_epochs//100, "gamma": 0.96},
+    "scheduler_params": {
+        "step_size": num_epochs//100, 
+        "gamma"    : 0.96
+    },
     "acc_steps": 1,
 }
 
 # ------ construct network and train -----
 unet = unet(**unet_params)
+# directory of init weights and biases
+fn_init_weights = os.path.join(train_params["save_path"],"DIP_UNet_init_weights.pt" )
+# if not done before, save the initial unet weights and biases
+if not os.path.isfile(fn_init_weights):
+    torch.save(unet.state_dict(), fn_init_weights)
+# load init weights and biases
+init_weights = torch.load(fn_init_weights)
+unet.load_state_dict(init_weights) 
+del init_weights
+
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
@@ -128,7 +133,13 @@ scheduler = scheduler(optimizer, **train_params["scheduler_params"])
 # log setup
 import pandas as pd
 logging = pd.DataFrame(
-    columns=["loss", "lr", "psnr", "ssim"]
+    columns=[
+        "loss", 
+        "lr", 
+        "psnr", 
+        "ssim", 
+        "loc_lip"
+    ]
 )
 # progressbar setup
 from tqdm import tqdm
@@ -146,14 +157,14 @@ from dip_utils import get_img_rec, center_scale_01
 # training loop
 isave = 0
 # magnitude of added gaussian noise during training
-sigma_p = 1/30
+sigma_p = 0#1/30
 for epoch in range(train_params["num_epochs"]): 
     unet.train()  # make sure we are in train mode
     optimizer.zero_grad()
     # add gaussian noise to DIP input according to Ulyanov et al 2020
     additive_noise = sigma_p*torch.randn(z_tilde.shape).to(device)
     model_input = z_tilde + additive_noise
-    # get img = Re(sample), img_rec = Re(pred_img), pred_img = G(z_tilde, theta)
+    # get img = Re(sample), img_rec = Real(pred_img), pred_img = G(z_tilde, theta)
     img, img_rec, pred_img = get_img_rec(sample, model_input, model = unet)
     # pred = A G(z_tilde, theta)
     pred = OpA(pred_img)
@@ -165,15 +176,27 @@ for epoch in range(train_params["num_epochs"]):
     # compute logging metrics, first prepare predicted image
     unet.eval()
     img, img_rec, pred_img = get_img_rec(sample, z_tilde, model = unet)
-    ssim_pred = ssim( img[None,None], center_scale_01(image = img_rec)[None,None] )
-    psnr_pred = psnr( img[None,None], center_scale_01(image = img_rec)[None,None] )
+    # Reconstruction error
+    rec_err = (sample.cpu() - pred_img[0].cpu()).norm(p=2)
+    # SSIM
+    ssim_pred = ssim( img[None,None], center_scale_01(image = img_rec)[None,None] ).detach()
+    # PSNR
+    psnr_pred = psnr( img[None,None], center_scale_01(image = img_rec)[None,None] ).detach()
+    local_lipshitz_constant = local_lipshitz(
+        network      = unet,
+        net_input    = z_tilde, 
+        perturbation = additive_noise,
+        pnorm        = 2,
+    ).detach()
     # append to log
     app_log = pd.DataFrame( 
         {
-            "loss" : loss.item(), 
-            "lr"   : scheduler.get_last_lr()[0],
-            "psnr" : psnr_pred,
-            "ssim" : ssim_pred,
+            "loss"    : loss.item(), 
+            "lr"      : scheduler.get_last_lr()[0],
+            "psnr"    : psnr_pred.item(),
+            "ssim"    : ssim_pred.item(),
+            "rec_err" : rec_err.item(),
+            "loc_lip" : local_lipshitz_constant.item(),
         }, 
         index = [0], 
     )
@@ -182,7 +205,11 @@ for epoch in range(train_params["num_epochs"]):
     # update progress bar
     progress_bar.update(1)
     progress_bar.set_postfix(
-        **unet._add_to_progress_bar({"loss": loss.item()})
+        **unet._add_to_progress_bar({
+        "loss"     : loss.item(), 
+        "loc. Lip" : local_lipshitz_constant.item(),
+        "rec_err"  : rec_err.item(),
+        })
     )
     if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
         print("Saving parameters of models and plotting evolution")
@@ -194,7 +221,13 @@ for epoch in range(train_params["num_epochs"]):
             sampling_pattern = "circ_sr2.5e-1",
         )
         if epoch < train_params["num_epochs"] - 1:
-            torch.save(unet.state_dict(), os.path.join(path,"DIP_UNet_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) ) )
+            # save rec. image
+            torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_epoch{epoch}.pt".format(
+                suffix = fn_suffix,
+                epoch  = epoch,
+            )))
+            # save the unet parameters for each num_epochs
+            torch.save(unet.state_dict(), os.path.join(path,"DIP_UNet_nojit_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) ) )
             ###### Plot evolution of training process #######
             cmap = "Greys_r"
             axs[0,isave].imshow(img_rec, cmap=cmap)
@@ -203,13 +236,21 @@ for epoch in range(train_params["num_epochs"]):
             axs[0,isave].set_axis_off(); axs[1,isave].set_axis_off()
             isave += 1       
         else:
-            torch.save(unet.state_dict(), os.path.join(path,"DIP_UNet_{suffix}_last.pt".format(suffix = fn_suffix) ) )
-        
+            # save last rec img
+            torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_epoch{epoch}.pt".format(
+                suffix = fn_suffix,
+                epoch  = epoch,
+            )))
+            # save last unet params
+            torch.save(unet.state_dict(), os.path.join(path,"DIP_UNet_nojit_{suffix}_last.pt".format(suffix = fn_suffix) ) )
+
+# save the logging table to pickle
+logging.to_pickle(os.path.join(config.RESULTS_PATH, "DIP", "DIP_UNet_nojit_logging.pkl"))
 
 # TODO make figures presentable and functions where it is necessary
 fig.tight_layout()
-fig_savepath = os.path.join(config.RESULTS_PATH, "plots/DIP/")
-fig.savefig(os.path.join(fig_savepath, "DIP_evolution.png"), bbox_inches="tight")
+fig_savepath = os.path.join(config.RESULTS_PATH, "../plots/DIP/")
+fig.savefig(os.path.join(fig_savepath, "DIP_nojit_evolution.png"), bbox_inches="tight")
 
 # save final reconstruction
 unet.eval()
@@ -217,4 +258,4 @@ img, img_rec, rec = get_img_rec(sample, z_tilde, model = unet)
 # center and normalize to x_hat in [0,1]
 img_rec = (img_rec - img_rec.min() )/ (img_rec.max() - img_rec.min() )
 from dip_utils import plot_train_DIP
-plot_train_DIP(img, img_rec, logging)
+plot_train_DIP(img, img_rec, logging, save_fn = os.path.join(fig_savepath, "DIP_nojit_train_metrics") )

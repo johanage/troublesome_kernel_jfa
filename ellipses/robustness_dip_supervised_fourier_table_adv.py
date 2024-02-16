@@ -20,9 +20,14 @@ methods = cfg_rob.methods
 # select reconstruction methods
 methods_include = [
     "DIP UNet no jit",
-    "Supervised UNet no jit",
-    "Supervised UNet jit",
-    "Supervised UNet jit low noise",
+    "DIP UNet no jit 2/3 iterations",
+    "DIP UNet no jit 1/3 iterations",
+    #"DIP UNet jit",
+    #"Supervised UNet no jit",
+    #"Supervised UNet jit",
+    #"Supervised UNet jit low noise",
+    #"Supervised UNet jit mod",
+    #"Supervised UNet jit very high noise",
     #'L1',
     #"UNet it no jit",
     #"UNet it jit mod",
@@ -34,9 +39,14 @@ methods = methods.loc[methods_include]
 # select methods excluded from (re-)performing attacks
 methods_no_calc = [
     "DIP UNet no jit",
+    "DIP UNet no jit 2/3 iterations",
+    "DIP UNet no jit 1/3 iterations",
+    "DIP UNet jit",
     "Supervised UNet no jit",
     "Supervised UNet jit",
     "Supervised UNet jit low noise",
+    "Supervised UNet jit mod",
+    "Supervised UNet jit very high noise",
     #'L1',
     #"UNet it jit",
     #"UNet it no jit",
@@ -203,31 +213,35 @@ results_save.to_pickle(save_results)
 # ----- plotting -----
 
 if do_plot:
-
     # LaTeX typesetting
     rc("font", **{"family": "serif", "serif": ["Palatino"]})
     rc("text", usetex=True)
 
     # +++ visualization of table +++
-    fig, ax = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
+    fig, ax         = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
+    fig_var, ax_var = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
 
     for (idx, method) in methods.loc[methods_plot].iterrows():
         if idx in methods_plot:
             print(f'idx: {idx}, method: {method}, res: {results.loc[idx].X_adv_err}')
             err_mean = results.loc[idx].X_adv_err[:, :].mean(dim=-1)
-            err_std = results.loc[idx].X_adv_err[:, :].std(dim=-1)
-            plt.plot(
+            err_std  = results.loc[idx].X_adv_err[:, :].std(dim=-1)
+            kwargs_plot = {
+                "linestyle" : method["info"]["plt_linestyle"],
+                "linewidth" : method["info"]["plt_linewidth"],
+                "marker"    : method["info"]["plt_marker"],
+                "color"     : method["info"]["plt_color"],
+                "label"     : method["info"]["name_disp"],
+            }
+            ax.plot(
                 noise_rel,
                 err_mean,
-                linestyle = method["info"]["plt_linestyle"],
-                linewidth = method["info"]["plt_linewidth"],
-                marker    = method["info"]["plt_marker"],
-                color     = method["info"]["plt_color"],
-                label     = method["info"]["name_disp"],
+                **kwargs_plot,
             )
-            fill_between_methods = ("L1", "UNet it jit mod", "UNet it jit", "UNet it no jit", "DIP UNet no jit", "Supervised UNet no jit", "Supervised UNet jit", "Supervised UNet jit low noise")
+            ax_var.plot(noise_rel, err_std**2, **kwargs_plot)
+            fill_between_methods = (None,)#("L1", "UNet it jit mod", "UNet it jit", "UNet it no jit", "DIP UNet no jit", "Supervised UNet no jit", "Supervised UNet jit", "Supervised UNet jit low noise")
             if idx in fill_between_methods:
-                plt.fill_between(
+                ax.fill_between(
                     noise_rel,
                     err_mean + err_std,
                     err_mean - err_std,
@@ -235,18 +249,22 @@ if do_plot:
                     color = method["info"]["plt_color"],
                 )
 
-    plt.yticks(np.arange(0, 1, step=0.05))
-    plt.ylim((-0.01, 0.36))
-    #ax.set_xticks(ax.get_xticks().tolist()[1:-1])
-    ax.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
-    ax.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])
-    plt.legend(loc="upper left", fontsize=12)
+    ax.set_yticks(np.arange(0, 1, step=0.05))
+    ax.set_ylim((0.05, 0.18))
+    for a in (ax, ax_var):
+        a.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
+        a.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])
+        a.legend(loc="upper left", fontsize=12)
 
     if save_plot:
         fig.savefig(
-            os.path.join(save_path, "fig_table_adv.pdf"), bbox_inches="tight"
+            #os.path.join(save_path, "fig_table_adv.pdf"), bbox_inches="tight"
+            os.path.join(save_path, "fig_table_adv_dip.pdf"), bbox_inches="tight"
         )
-
+        fig_var.savefig(
+            #os.path.join(save_path, "fig_table_adv_var.pdf"), bbox_inches="tight"
+            os.path.join(save_path, "fig_table_adv_var_dip.pdf"), bbox_inches="tight"
+        )
     plt.show()
 
 if save_table:

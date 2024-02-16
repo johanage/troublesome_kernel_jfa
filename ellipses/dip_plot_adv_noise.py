@@ -34,7 +34,8 @@ unet_params = {
     "base_features" : 32,
     "out_channels"  : 2,
     "operator"      : OpA_m,
-    "inverter"      : None, 
+    "inverter"      : None,
+    "upsampling"    : "nearest",#"trans_conv",
 }
 unet = UNet
 # ------ construct network and train -----
@@ -78,17 +79,37 @@ adversarial_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt
 perturbed_measurement = measurement + adversarial_noise
 
 # plot comparison 
-fig, axs = plt.subplots(1, 5, figsize = (15, 5))
+fig, axs = plt.subplots(1, 6, figsize = (15, 5))
 cmap = "Greys_r"
 [ax.set_axis_off() for ax in axs]
 plot_gt_image    = axs[0].imshow(tar.cpu(), cmap=cmap)
+# orthogonal component of adversarial image noise aka A^*delta_adv
 img_adv_noise    = OpA.adj(adversarial_noise).detach().cpu()
-plot_adv_noise   = axs[1].imshow(img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
-plot_adv_example = axs[2].imshow(tar.cpu() + img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
-plot_dip_rec     = axs[3].imshow(img_rec, cmap=cmap)
-for ax,plot in zip(axs,[plot_gt_image, plot_adv_noise, plot_adv_example, plot_dip_rec]):
+# orthogonal component of image aka x^\perp = A^*Ax
+img_orth = OpA.adj(OpA(tar_complex))
+# null space component of image aka x_det = x - x^\perp
+img_null  = tar_complex - img_orth
+ehat_adv_orth = OpA.adj(OpA(img_rec_complex.cpu() - tar_complex.cpu()))
+img_adv_noise_null_complex = img_rec_complex.cpu() - tar_complex.cpu() - ehat_adv_orth
+img_adv_noise_null         = img_adv_noise_null_complex[0].norm(p=2, dim=0)
+# make plots
+plot_adv_noise          = axs[1].imshow(img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
+plot_rec_adv_noise_orth = axs[2].imshow(ehat_adv_orth[0].norm(p=2, dim=0), cmap=cmap)
+plot_adv_example        = axs[3].imshow(tar.cpu() + img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
+plot_dip_rec            = axs[4].imshow(img_rec, cmap=cmap)
+plot_dip_adv_noise_null = axs[5].imshow(img_adv_noise_null, cmap=cmap)
+for ax,plot in zip(axs,[
+    plot_gt_image, 
+    plot_adv_noise, 
+    plot_rec_adv_noise_orth, 
+    plot_adv_example, 
+    plot_dip_rec, 
+    plot_dip_adv_noise_null
+]):
     divider = mal(ax)
     cax     = divider.append_axes("right", size="5%", pad = 0.05)
     fig.colorbar(plot, cax=cax)
 # save figure
-fig.savefig(os.getcwd() + "/plots/adversarial_plots/DIP/dip_x_compare_xadv.png")
+fn_savefig = os.path.join(config.RESULTS_PATH, "..", "plots/adversarial_plots/DIP/dip_x_compare_xadv.png")
+#fig.tight_layout()
+fig.savefig(fn_savefig)

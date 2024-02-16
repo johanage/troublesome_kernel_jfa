@@ -78,9 +78,10 @@ def loss_func(pred, tar):
 
 
 train_phases = 2
-num_epochs = [100,10]
+num_epochs = [0,100]
 lr_gamma = 0.96
-jitter_params = {"eta" : 1e-1, "scale_lo" : 0.0, "scale_hi" : 1.0}
+jitter_params = {"eta" : 1e-1,  "scale_lo" : 0.0, "scale_hi" : 1.0}
+
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
     #"num_epochs" : [35,6], # ellipses
@@ -91,6 +92,7 @@ train_params = {
         os.path.join(
             config.RESULTS_PATH,
             #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
+            #"supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256"
             "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256"
             "eta_{eta:0.3f}_train_phase_{train_phase}".format(
                 eta = jitter_params["eta"],
@@ -98,7 +100,7 @@ train_params = {
         )
         for i in range(train_phases + 1)
     ],
-    "save_epochs": 10,
+    "save_epochs": 100,
     "optimizer": torch.optim.Adam,
     "optimizer_params": [
         {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
@@ -125,7 +127,6 @@ train_params = {
     "train_loader_params": {"shuffle": True, "num_workers": 8},
     "val_loader_params": {"shuffle": False, "num_workers": 8},
 }
-
 # ----- data configuration -----
 train_data_params = {
     "path": config.DATA_PATH,
@@ -156,13 +157,12 @@ with open(
 unet = unet(**unet_params)
 
 # start from previously trained network
-"""
-root = ""
-param_dir = "/models/Fourier_UNet_it_jitter_train_phase_2/"
+#"""
+param_dir = "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2"
 file_param = "model_weights.pt"
-params_loaded = torch.load(root + param_dir + file_param)
+params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir,file_param))
 unet.load_state_dict(params_loaded)
-"""
+#"""
 
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)
@@ -174,17 +174,34 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # measurement y has shape (2, m) since y in C^m
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
-# run training 
+# run training
+#mod = False
+mod = True
+if mod:
+    train_params["save_path"] = [
+        os.path.join(
+            config.RESULTS_PATH,
+            "supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256"
+            "eta_{eta:0.3f}_train_phase_{train_phase}".format(
+                eta = jitter_params["eta"],
+                train_phase = (i + 1) % (train_phases + 1)),
+        )
+        for i in range(train_phases + 1)
+    ]
+
 for i in range(train_phases):
     train_params_cur = {}
     for key, value in train_params.items():
         train_params_cur[key] = (
             value[i] if isinstance(value, (tuple, list)) else value
         )
+    if i == 1 and mod: 
+        jit_trans = train_params_cur["train_transform"].transforms.pop() # remove jittering
+        assert isinstance(jit_trans, Jitter), "popped the wrong transform, removed %s"%(type(jit_trans))
     if i == 0:
         # Make sure the filename corresponds to sample pattern!!!
-        #train_params_cur["fn_evolution"] = "sr_0.25_brain256_evolution"
-        train_params_cur["fn_evolution"] = "sr_0.25_ellipses256_evolution"
+        train_params_cur["fn_evolution"] = "sr_0.25_brain256_evolution"
+        #train_params_cur["fn_evolution"] = "sr_0.25_ellipses256_evolution"
         train_params_cur["plot_evolution"] = True
     else:
          train_params_cur["plot_evolution"] = False

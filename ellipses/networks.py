@@ -11,10 +11,33 @@ from typing import Type
 # local imports
 from operators import l2_error, to_complex
 
+# ------- Lipshitz constant ----------------
+def local_lipshitz(
+    network      : torch.nn.Module,
+    net_input    : torch.Tensor,
+    perturbation : torch.Tensor,
+    pnorm        : int = 2,
+) -> float:
+    """
+    Computes the local lipshitz for a given input and a perturbation.
+    -------------------------------------------------------------------------
+    The local Lipshitz constant is defined as
+
+    L^epsilon(Psi, x) = ||Psi(x + e) - Psi(x)||/||| e |||, |||e||| <= epsilon
+    -------------------------------------------------------------------------
+    Args:
+     - network      : the ML model
+     - net_input    : the input of the ML model
+     - perturbation : the local perturbation added to the input
+     - pnorm        : p in Lp-norm
+    """
+    out       = network.forward(net_input)
+    out_pert  = network.forward(net_input + perturbation)
+    norm_res  = perturbation.norm(p=2)
+    norm_diff = (out_pert - out).norm(p=2)
+    return norm_diff / norm_res
 
 # ----- ----- Abstract Base Network ----- -----
-
-
 class InvNet(torch.nn.Module, metaclass=ABCMeta):
     """ Abstract base class for networks solving linear inverse problems.
 
@@ -173,8 +196,6 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         val_transform=None,
         train_loader_params={"shuffle": True},
         val_loader_params={"shuffle": False},
-        plot_evolution = True,
-        fn_evolution = None,
     ):
         optimizer = optimizer(self.parameters(), **optimizer_params)
         scheduler = scheduler(optimizer, **scheduler_params)
@@ -202,10 +223,7 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         logging = pd.DataFrame(
             columns=["loss", "val_loss", "rel_l2_error", "val_rel_l2_error"]
         )
-        if plot_evolution:
-            fig_evo, axs_evo = plt.subplots(2,10,figsize=(50,10) )
-            isave = 0
-            [ax.set_axis_off() for ax in axs_evo.flatten()]
+        
         for epoch in range(num_epochs):
             self.train()  # make sure we are in train mode
             t = tqdm(
@@ -302,6 +320,7 @@ class UNet(InvNet):
         inverter      : Type[torch.nn.Module] = None, 
         operator      : Type[torch.nn.Module] = None,
         upsampling    : str   = "upsample",
+        padding_mode  : str   = "reflect",
     ):
         """
         Args:
@@ -314,45 +333,50 @@ class UNet(InvNet):
         self.encoder1 = UNet._conv_block(
             in_channels,
             base_features,
-            drop_factor=drop_factor,
-            block_name="encoding_1",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "encoding_1",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         self.pool1 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.encoder2 = UNet._conv_block(
             base_features,
             base_features * 2,
-            drop_factor=drop_factor,
-            block_name="encoding_2",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "encoding_2",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         self.pool2 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.encoder3 = UNet._conv_block(
             base_features * 2,
             base_features * 4,
-            drop_factor=drop_factor,
-            block_name="encoding_3",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "encoding_3",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         self.pool3 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.encoder4 = UNet._conv_block(
             base_features * 4,
             base_features * 8,
-            drop_factor=drop_factor,
-            block_name="encoding_4",
-            device = self.device,
+            drop_factor  =  drop_factor,
+            block_name   = "encoding_4",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         self.pool4 = torch.nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.bottleneck = UNet._conv_block(
             base_features * 8,
             base_features * 16,
-            drop_factor=drop_factor,
-            block_name="bottleneck",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "bottleneck",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         if upsampling == "trans_conv":
             mode_params = {
@@ -375,9 +399,10 @@ class UNet(InvNet):
         self.decoder4 = UNet._conv_block(
             base_features * 16,
             base_features * 8,
-            drop_factor=drop_factor,
-            block_name="decoding_4",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "decoding_4",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         
         if upsampling == "trans_conv": mode_params["in_channels"] = base_features * 8; mode_params["out_channels"] = base_features * 4;
@@ -390,9 +415,10 @@ class UNet(InvNet):
         self.decoder3 = UNet._conv_block(
             base_features * 8,
             base_features * 4,
-            drop_factor=drop_factor,
-            block_name="decoding_3",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "decoding_3",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         
         if upsampling == "trans_conv": mode_params["in_channels"] = base_features * 4; mode_params["out_channels"] = base_features * 2;
@@ -405,9 +431,10 @@ class UNet(InvNet):
         self.decoder2 = UNet._conv_block(
             base_features * 4,
             base_features * 2,
-            drop_factor=drop_factor,
-            block_name="decoding_2",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "decoding_2",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
         
         if upsampling == "trans_conv": mode_params["in_channels"] = base_features * 2; mode_params["out_channels"] = base_features;
@@ -420,9 +447,10 @@ class UNet(InvNet):
         self.decoder1 = UNet._conv_block(
             base_features * 2,
             base_features,
-            drop_factor=drop_factor,
-            block_name="decoding_1",
-            device = self.device,
+            drop_factor  = drop_factor,
+            block_name   = "decoding_1",
+            device       = self.device,
+            padding_mode = padding_mode,
         )
 
         self.outconv = torch.nn.Conv2d(
@@ -467,8 +495,8 @@ class UNet(InvNet):
         dec1 = self.decoder1(dec1)
         return self.outconv(dec1)
 
-    # TODO: add option to do upsampling with UpSampling and not just transpose convolution
-    # NOTE: according to Ulyanov et al. transpose convolutions give worse results than Upsampling, see https://github.com/DmitryUlyanov/deep-image-prior/blob/master/models/unet.py
+    # NOTE: according to Ulyanov et al. transpose convolutions give worse results than Upsampling
+    #       see https://github.com/DmitryUlyanov/deep-image-prior/blob/master/models/unet.py
     @staticmethod
     def _up_sample(
         mode         : str,
@@ -506,7 +534,16 @@ class UNet(InvNet):
         else: return ValueError("Mode %s not found in system"%mode)
 
     @staticmethod
-    def _conv_block(in_channels, out_channels, drop_factor, block_name, device = None, act_func = "leakyrelu", negative_slope = 0.1):
+    def _conv_block(
+        in_channels    : int, 
+        out_channels   : int, 
+        drop_factor    : float, 
+        block_name     : str, 
+        device         : torch.device = None, 
+        act_func       : str = "leakyrelu", 
+        negative_slope : float = 0.1,
+        padding_mode   : str = "reflect",
+    ) -> Type[torch.nn.Module]:
         if act_func == "leakyrelu":
             activation_function = torch.nn.LeakyReLU(negative_slope=negative_slope)#, inplace=True)
         if act_func == "relu":
@@ -521,6 +558,7 @@ class UNet(InvNet):
                             out_channels=out_channels,
                             kernel_size=3,
                             padding=1,
+                            padding_mode = padding_mode,
                             bias=True,
                         ),
                     ),
@@ -534,6 +572,7 @@ class UNet(InvNet):
                             out_channels=out_channels,
                             kernel_size=3,
                             padding=1,
+                            padding_mode = padding_mode,
                             bias=True,
                         ),
                     ),

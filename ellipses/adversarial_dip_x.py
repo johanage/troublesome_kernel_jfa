@@ -34,7 +34,8 @@ unet_params = {
     "base_features" : 32,
     "out_channels"  : 2,
     "operator"      : OpA_m,
-    "inverter"      : None, 
+    "inverter"      : None,
+    "upsampling"    : "nearest",
 }
 unet = UNet
 # ------ construct network and train -----
@@ -69,7 +70,6 @@ file_param = "DIP_UNet_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
 params_loaded = torch.load( os.path.join(param_dir,file_param) )
 unet.load_state_dict(params_loaded)
 unet.eval()
-breakpoint()
 # Init adversarial noise setup
 from find_adversarial import PAdam_DIP_x
 from functools import partial
@@ -79,6 +79,7 @@ from operators import proj_l2_ball
 # init xhat = Psi_theta(z_tilde)
 #loss_adv = lambda adv_noise, xhat, x, meas_op, beta: ( meas_op(xhat) - (meas_op(x) + adv_noise) ).pow(2).sum() - beta * (xhat - x).pow(2).sum() 
 from dip_utils import loss_adv_noise
+#TODO: include white box version and confirm that adversarial noise is found in C^N, i.e. for the image not the measurement
 loss_adv_partial = partial(loss_adv_noise,  x = tar_complex, meas_op = OpA, beta = 1e-3)
 # init input optimizer (PGD or alternative methods like PAdam)
 adv_init_fac   = 3
