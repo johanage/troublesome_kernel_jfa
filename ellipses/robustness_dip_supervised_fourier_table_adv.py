@@ -219,7 +219,7 @@ if do_plot:
 
     # +++ visualization of table +++
     fig, ax         = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
-    fig_var, ax_var = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
+    fig_std, ax_std = plt.subplots(clear=True, figsize=(6, 3), dpi=200)
 
     for (idx, method) in methods.loc[methods_plot].iterrows():
         if idx in methods_plot:
@@ -238,7 +238,7 @@ if do_plot:
                 err_mean,
                 **kwargs_plot,
             )
-            ax_var.plot(noise_rel, err_std**2, **kwargs_plot)
+            ax_std.plot(noise_rel, err_std, **kwargs_plot)
             fill_between_methods = (None,)#("L1", "UNet it jit mod", "UNet it jit", "UNet it no jit", "DIP UNet no jit", "Supervised UNet no jit", "Supervised UNet jit", "Supervised UNet jit low noise")
             if idx in fill_between_methods:
                 ax.fill_between(
@@ -251,7 +251,7 @@ if do_plot:
 
     ax.set_yticks(np.arange(0, 1, step=0.05))
     ax.set_ylim((0.05, 0.18))
-    for a in (ax, ax_var):
+    for a in (ax, ax_std):
         a.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
         a.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])
         a.legend(loc="upper left", fontsize=12)
@@ -261,9 +261,9 @@ if do_plot:
             #os.path.join(save_path, "fig_table_adv.pdf"), bbox_inches="tight"
             os.path.join(save_path, "fig_table_adv_dip.pdf"), bbox_inches="tight"
         )
-        fig_var.savefig(
-            #os.path.join(save_path, "fig_table_adv_var.pdf"), bbox_inches="tight"
-            os.path.join(save_path, "fig_table_adv_var_dip.pdf"), bbox_inches="tight"
+        fig_std.savefig(
+            #os.path.join(save_path, "fig_table_adv_std.pdf"), bbox_inches="tight"
+            os.path.join(save_path, "fig_table_adv_std_dip.pdf"), bbox_inches="tight"
         )
     plt.show()
 

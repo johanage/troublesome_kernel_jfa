@@ -152,20 +152,20 @@ num_save = train_params["num_epochs"] // train_params["save_epochs"]
 fig, axs = plt.subplots(2,num_save,figsize=(5*num_save,10) )
 
 # function that returns img of sample and the reconstructed image
-from dip_utils import get_img_rec, center_scale_01
+from dip_utils import get_img_rec#, center_scale_01
 
 # training loop
 isave = 0
-# magnitude of added gaussian noise during training
-sigma_p = 0#1/30
+# magnitude of added gaussian noise during training - noise-based regularisation
+sigma_p = 1/30
 for epoch in range(train_params["num_epochs"]): 
     unet.train()  # make sure we are in train mode
     optimizer.zero_grad()
-    # add gaussian noise to DIP input according to Ulyanov et al 2020
+    # noise-based regularisation: add gaussian noise to DIP input according to Ulyanov et al 2020
     additive_noise = sigma_p*torch.randn(z_tilde.shape).to(device)
-    model_input = z_tilde + additive_noise
-    # get img = Re(sample), img_rec = Real(pred_img), pred_img = G(z_tilde, theta)
-    img, img_rec, pred_img = get_img_rec(sample, model_input, model = unet)
+    model_input    = z_tilde + additive_noise
+    # pred_img = G(model_input, theta), model_input = z_tilde + noise
+    pred_img = unet.forward(model_input)
     # pred = A G(z_tilde, theta)
     pred = OpA(pred_img)
     loss = loss_func(pred, measurement)
@@ -175,19 +175,24 @@ for epoch in range(train_params["num_epochs"]):
     
     # compute logging metrics, first prepare predicted image
     unet.eval()
-    img, img_rec, pred_img = get_img_rec(sample, z_tilde, model = unet)
-    # Reconstruction error
-    rec_err = (sample.cpu() - pred_img[0].cpu()).norm(p=2)
-    # SSIM
-    ssim_pred = ssim( img[None,None], center_scale_01(image = img_rec)[None,None] ).detach()
-    # PSNR
-    psnr_pred = psnr( img[None,None], center_scale_01(image = img_rec)[None,None] ).detach()
-    local_lipshitz_constant = local_lipshitz(
-        network      = unet,
-        net_input    = z_tilde, 
-        perturbation = additive_noise,
-        pnorm        = 2,
-    ).detach()
+    with torch.no_grad():
+        #img, img_rec, pred_img = get_img_rec(sample, z_tilde, model = unet)
+        pred_img_eval = unet.forward(model_input).cpu()
+        # Reconstruction error
+        og_complex_img = sample.cpu()[None]
+        rec_err = (og_complex_img - pred_img_eval).norm(p=2)
+        # SSIM
+        og_img  = og_complex_img.norm(p=2, dim=(0,1))[None, None]
+        img_rec = pred_img_eval.norm(p=2, dim=(0,1))[None, None]
+        ssim_pred = ssim( og_img, img_rec)
+        # PSNR
+        psnr_pred = psnr( og_img, img_rec)
+        local_lipshitz_constant = local_lipshitz(
+            network      = unet,
+            net_input    = z_tilde, 
+            perturbation = additive_noise,
+            pnorm        = 2,
+        ).cpu()
     # append to log
     app_log = pd.DataFrame( 
         {
@@ -213,6 +218,9 @@ for epoch in range(train_params["num_epochs"]):
     )
     if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
         print("Saving parameters of models and plotting evolution")
+        # set img_rec to 2D shape
+        img_rec = img_rec[0,0]
+        img     = og_img[0,0]
         ###### Save parameters of DIP model
         path = train_params["save_path"]
         fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}".format(

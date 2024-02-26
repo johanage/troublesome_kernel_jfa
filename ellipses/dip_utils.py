@@ -49,6 +49,12 @@ def plot_train_DIP(
     fig.savefig(save_fn, bbox_inches = "tight")
 
 def get_img_rec(sample, z_tilde, model):
+    """
+    Computes the following:
+     - img            : real part of original image
+     - reconstruction : complex reconstruction, aka raw output of model
+     - img_rec        : real part of reconstructed image
+    """
     img = torch.sqrt(sample[0]**2 + sample[1]**2).to("cpu")
     reconstruction = model.forward(z_tilde)
     img_rec = torch.sqrt(reconstruction[0,0]**2 + reconstruction[0,1]**2).detach().to("cpu")
@@ -108,30 +114,29 @@ def loss_adv_example(
     return (yhat - y_perturbed).pow(2).sum() - beta * recerr.pow(2).sum()
 
 def loss_adv_example_white_box(
-    adv_noise   : torch.Tensor,
-    xhat        : torch.Tensor,
-    x           : torch.Tensor,
-    meas_op     : operators.Fourier,
-    beta        : float,
+    adv_noise_img : torch.Tensor,
+    xhat          : torch.Tensor,
+    x             : torch.Tensor,
+    meas_op       : operators.Fourier,
+    beta          : float,
 ) -> torch.Tensor:
     """
     Loss function used in the first step to acquire the adversarial noise.
-       l_adv = ||A xhat - y_adv||_2^2 - beta * || x - xhat||_2^2
+       l_adv = ||A xhat - A(x + adv_noise_img)||_2^2 - beta * || x - xhat||_2^2
     
     Args:
-    - adv_noise   : adversarial noise for image (therefore white box suffix on method function)
-    - xhat        : reconstructed image
-    - x           : ground truth image
-    - meas_op     : measurement operator A
-    - beta        : parameter of penalizing closeness between orig. image x and reconstructed image xhat
+    - adv_noise_img : adversarial noise for image (therefore white box suffix on method function)
+    - xhat          : reconstructed image
+    - x             : ground truth image
+    - meas_op       : measurement operator A
+    - beta          : parameter of penalizing closeness between orig. image x and reconstructed image xhat
     Out:
     - l_adv as written above
     """
     yhat = meas_op(xhat)
-    y_perturbed = meas_op(x + adv_noise)
+    y_perturbed = meas_op(x + adv_noise_img)
     recerr = xhat - x
     return (yhat - y_perturbed).pow(2).sum() - beta * recerr.pow(2).sum()
-
 
 from tqdm import tqdm
 mseloss = torch.nn.MSELoss(reduction="sum")

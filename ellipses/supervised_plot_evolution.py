@@ -88,6 +88,8 @@ for indices, param_dir in zip([ [0,6,12,15,18,24,30,35], [3, 6]], [param_dir_pha
         imres = impred - v_tar.detach().cpu()
         axs_evo[0,isave].imshow(impred, cmap=cmap)
         axs_evo[1,isave].imshow(imres, cmap=cmap)
+        # add image eval metrics as text to residual row
+        # TODO: axs_evo[1,isave].text()
         isave +=1
 fig_evo.tight_layout()
 fig_evo.savefig(os.path.join(plot_dir, fn_evolution + ".png"), bbox_inches="tight")

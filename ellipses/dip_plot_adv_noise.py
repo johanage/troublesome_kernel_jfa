@@ -58,7 +58,24 @@ noise_mag = .1
 z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
 z_tilde = z_tilde.to(device)
 
-# load model weights
+# load model weights normal reconstruction
+param_dir = os.path.join(config.RESULTS_PATH, "DIP")
+file_param = "DIP_UNet_nojit_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
+params_loaded = torch.load( os.path.join(param_dir,file_param) )
+unet.load_state_dict(params_loaded)
+# freeze params
+for p in unet.parameters():
+    p.requires_grad = False
+# disable training layers
+unet.eval()
+# reconstruct measurement
+img_rec_orig_complex = unet.forward(z_tilde).cpu() 
+img_rec_orig = img_rec_orig_complex[0].norm(p=2, dim=0)
+# rel. l2-error
+rec_orig_rel_l2err = (tar_complex.cpu() - img_rec_orig_complex[0]).norm(p=2)/tar_complex.norm(p=2)
+print("DIP_x reconstruction rel. l2-error", rec_orig_rel_l2err)
+
+# load model weights adversarial net
 param_dir = os.path.join(config.RESULTS_PATH, "DIP/adv_attack")
 file_param = "DIP_UNet_adv_lr_0.0005_gamma_0.96_sp_circ_sr2.5e-1_last.pt"
 params_loaded = torch.load( os.path.join(param_dir,file_param) )
@@ -75,29 +92,34 @@ img_rec = img_rec_complex[0].norm(p=2, dim=0)
 rec_rel_l2err = (tar_complex.cpu() - img_rec_complex[0]).norm(p=2)/tar_complex.norm(p=2)
 print("DIP_x reconstruction rel. l2-error", rec_rel_l2err)
 # load noise
-adversarial_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt")
+adversarial_noise_image = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_image_dip_x.pt")
+adversarial_noise = OpA(adversarial_noise_image)
 perturbed_measurement = measurement + adversarial_noise
 
+#TODO: fix reconstruction image of the original image and the adversarial reconstruction!!! 
 # plot comparison 
-fig, axs = plt.subplots(1, 6, figsize = (15, 5))
+fig, axs = plt.subplots(1, 7, figsize = (15, 5))
 cmap = "Greys_r"
 [ax.set_axis_off() for ax in axs]
-plot_gt_image    = axs[0].imshow(tar.cpu(), cmap=cmap)
+plot_gt_image  = axs[0].imshow(tar.cpu(), cmap=cmap)
+plot_rec_image = axs[1].imshow(img_rec_orig.cpu(), cmap=cmap)
 # orthogonal component of adversarial image noise aka A^*delta_adv
-img_adv_noise    = OpA.adj(adversarial_noise).detach().cpu()
+img_adv_noise = adversarial_noise_image.detach().cpu()
 # orthogonal component of image aka x^\perp = A^*Ax
 img_orth = OpA.adj(OpA(tar_complex))
+# orthoghonal component of reconstruction aka xhat^perp = A^*A(xhat)
+img_rec_orth = OpA.adj(OpA(img_rec_complex.cpu()))
 # null space component of image aka x_det = x - x^\perp
 img_null  = tar_complex - img_orth
-ehat_adv_orth = OpA.adj(OpA(img_rec_complex.cpu() - tar_complex.cpu()))
-img_adv_noise_null_complex = img_rec_complex.cpu() - tar_complex.cpu() - ehat_adv_orth
+ehat_adv_orth = OpA.adj(OpA(img_rec_complex.cpu() - img_rec_orig_complex.cpu()))
+img_adv_noise_null_complex = img_rec_complex.cpu() - img_rec_orig_complex.cpu() - ehat_adv_orth
 img_adv_noise_null         = img_adv_noise_null_complex[0].norm(p=2, dim=0)
 # make plots
-plot_adv_noise          = axs[1].imshow(img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
-plot_rec_adv_noise_orth = axs[2].imshow(ehat_adv_orth[0].norm(p=2, dim=0), cmap=cmap)
-plot_adv_example        = axs[3].imshow(tar.cpu() + img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
-plot_dip_rec            = axs[4].imshow(img_rec, cmap=cmap)
-plot_dip_adv_noise_null = axs[5].imshow(img_adv_noise_null, cmap=cmap)
+plot_adv_noise          = axs[2].imshow(img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
+plot_rec_adv_noise_orth = axs[3].imshow(ehat_adv_orth[0].norm(p=2, dim=0), cmap=cmap)
+plot_adv_example        = axs[4].imshow(tar.cpu() + img_adv_noise[0].norm(p=2, dim=0), cmap=cmap)
+plot_dip_rec            = axs[5].imshow(img_rec, cmap=cmap)
+plot_dip_adv_noise_null = axs[6].imshow(img_adv_noise_null, cmap=cmap)
 for ax,plot in zip(axs,[
     plot_gt_image, 
     plot_adv_noise, 

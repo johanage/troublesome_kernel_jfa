@@ -1,7 +1,5 @@
-import glob
-import os
-import random
-
+import glob, os, random
+from typing import Tuple
 import numpy as np
 import odl
 import torch
@@ -274,7 +272,25 @@ class Jitter(object):
     """ Adds random pertubations to the input of (input, target) pairs.
     """
 
-    def __init__(self, eta, scale_lo, scale_hi, n_seed=None, t_seed=None):
+    def __init__(
+        self, 
+        eta, 
+        scale_lo : float, 
+        scale_hi : float, 
+        n_seed   : int = None, 
+        t_seed   : int = None
+    ) -> None:
+        """
+        --------------------------------------------------------------------------
+        Initiates the Jitter module implemented as a torchvision.transofrms-object
+        --------------------------------------------------------------------------
+        Args:
+         - eta      : the relative noise level
+         - scale_lo : the lower bound on the noise scale
+         - scale_hi : the upper bound on the noise scale
+         - n_seed   : the rng seed int for the noise scale range
+         - t_seed   : the rng seed int for the noise vector generation
+        """
         self.eta      = eta
         self.scale_lo = scale_lo
         self.scale_hi = scale_hi
@@ -283,13 +299,35 @@ class Jitter(object):
         if t_seed is not None:
             self.trng.manual_seed(t_seed)
 
-    def __call__(self, inputs):
+    def __call__(
+        self, 
+        inputs  : torch.Tensor, 
+        distr   : str          = "normal"
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        --------------------------------------------------------------------------
+        Adds the noise to the measurements -> returning noisy measurement and target:
+
+        y_noisy = y + eta * scale * e / sqrt(m)
+
+        where y in C^m
+        --------------------------------------------------------------------------
+        Args:
+         - inputs : then measurement tensor
+         - distr  : the distribution choice
+        """
         meas, target = inputs
         m     = meas.shape[-1]  # number of sampled measurements
         scale = (
             self.scale_lo + (self.scale_hi - self.scale_lo) * self.rng.rand()
         )
-        noise = torch.randn(meas.shape, generator=self.trng).to(meas.device)
+        # distribution condition
+        if distr == "normal":
+            noise = torch.randn(meas.shape, generator=self.trng).to(meas.device)
+        elif distr == "uniform":
+            noise = torch.rand(meas.shape, generator=self.trng).to(meas.device)
+        else:
+            raise ValueError("invalid distribution choice for jitter-transform")
         meas_noisy = meas + self.eta / np.sqrt(m) * noise * scale
         return meas_noisy, target
 

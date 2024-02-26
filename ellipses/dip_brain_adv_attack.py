@@ -99,7 +99,7 @@ sample = to_complex(sample[None]).to(device)
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement[None].to(device)
-adv_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise.pt")
+adv_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt")
 perturbed_measurement = measurement + adv_noise
 
 # load the z_tilde used in pre-trained weights and to find aversarial noise
