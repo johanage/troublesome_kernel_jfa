@@ -17,15 +17,20 @@ if gpu_avail:
     torch.cuda.set_device(device)
 
 def plot_train_DIP(
-    img     : torch.tensor,
-    img_rec : torch.tensor,
-    logging : pd.DataFrame,
-    save_fn : str = "DIP_train_metrics.png",
-    cmap    : str = "Greys_r",
+    img      : torch.tensor,
+    img_rec  : torch.tensor,
+    logging  : pd.DataFrame,
+    save_fn  : str       = "DIP_train_metrics.png",
+    cmap     : str       = "Greys_r",
+    log_keys : list[str] = ["loss", "lr", "rel_rec_err"] 
 ) -> None:
     num_logging = len(logging.keys())
     fig, axs = plt.subplots(1,3 + num_logging,figsize=(15 + 5*num_logging,5) )
-    plot_img = axs[0].imshow(img, cmap=cmap); plot_img_rec = axs[1].imshow(img_rec, cmap=cmap);
+    # plot original image
+    plot_img = axs[0].imshow(img, cmap=cmap) 
+    # plot reconstructed image
+    plot_img_rec = axs[1].imshow(img_rec, cmap=cmap)
+    # plot absolute reconstruction error 
     plot_res = axs[2].imshow(torch.sqrt( (img - img_rec)**2), cmap=cmap)
     for ax,plot in zip(axs,[plot_img, plot_img_rec, plot_res]):
         divider = mal(ax)
@@ -33,13 +38,13 @@ def plot_train_DIP(
         fig.colorbar(plot, cax=cax)
     axs[0].set_title("Original image")
     axs[1].set_title("Reconstructed image")
-    axs[2].set_title("$\ell_2$-reconstruction error")
+    axs[2].set_title("Absolute reconstruction error")
     # plot logging variables
     for i, key in enumerate(logging.keys() ):
         val = logging[key]
-        if key in ["loss", "lr"]:
-            # plot logloss for better inspection
-            val = torch.log(torch.tensor(val))
+        if key in log_keys:
+            # plot logloss for better inspection - change of base to 10
+            val = torch.log(torch.tensor(val)) / torch.log(torch.tensor(10) )
             key = "log-" + key
         axs[3 + i].plot(val)
         axs[3 + i].set_title(key)

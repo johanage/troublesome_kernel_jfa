@@ -34,10 +34,15 @@ mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
 """
+sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
+sampling_rate = sr_list[-1]
+print("sampling rate used is :", sampling_rate)
+sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.getcwd() + "/sampling_patterns/", 
-    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
+    path = os.path.join(config.SP_PATH, "circle"),
+    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
 )
+
 # Fourier matrix
 OpA_m = Fourier_m(mask_fromfile.mask[None])
 # Fourier operator
@@ -56,8 +61,9 @@ unet_params = {
     "upsampling"    : "nearest",
 }
 unet = UNet
-# ------ construct network and train -----
+# ------ construct network with chosen architecture -----
 unet = unet(**unet_params)
+
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
@@ -83,14 +89,10 @@ train_params = {
     "acc_steps": 1,
 }
 
-# get train and validation data
-#dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
-#dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 # JFA's local dir
 dir_train = os.path.join(config.DATA_PATH, "train")
 dir_val   = os.path.join(config.DATA_PATH, "val")
-# NOTE: both Vegard's and JFA's dirs does not contain test dir
-
+# load sample that DIP has been trained on
 sample = torch.load( os.path.join(dir_train,"sample_00000.pt") )
 from operators import to_complex
 # go from real to complex valued sample - set imag part to zero
@@ -99,11 +101,18 @@ sample = to_complex(sample[None]).to(device)
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement[None].to(device)
-adv_noise = torch.load(os.getcwd() + "/adv_attack_dip/adv_noise_dip_x.pt")
+# load the adversarial noise (measurement adv noise)
+adv_noise = torch.load(os.path.join(os.getcwd(), "adv_attack_dip", "adv_noise_dip_x_%s_sr%.2f.pt"%(sp_type, sampling_rate)) )
+# compute perturbed measurement
 perturbed_measurement = measurement + adv_noise
 
+# load same init weights as was used to find the reconstruction 
+# that was the initial condition of the adversarial attack
+param_dir = os.path.join(config.SCRATCH_PATH, "DIP")
+unet.load_state_dict(torch.load( os.path.join(param_dir, "DIP_UNet_init_weights_%s_%.2f.pt"%(sp_type, sampling_rate)) ) )
+
 # load the z_tilde used in pre-trained weights and to find aversarial noise
-z_tilde = torch.load(os.getcwd() + "/adv_attack_dip/z_tilde.pt")
+z_tilde = torch.load(os.path.join(param_dir, "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
 z_tilde = z_tilde.to(device)
 
 # optimizer setup
@@ -128,7 +137,7 @@ num_save = train_params["num_epochs"] // train_params["save_epochs"]
 fig, axs = plt.subplots(2,num_save,figsize=(5*num_save,10) )
 
 # function that returns img of sample and the reconstructed image
-from dip_utils import get_img_rec, center_scale_01
+from dip_utils import get_img_rec#, center_scale_01
 
 # training loop
 isave = 0
@@ -151,9 +160,14 @@ for epoch in range(train_params["num_epochs"]):
     
     # compute logging metrics, first prepare predicted image
     unet.eval()
-    img, img_rec, pred_img = get_img_rec(sample, z_tilde, model = unet)
-    ssim_pred = ssim( img[None,None], center_scale_01(image = img_rec)[None,None] )
-    psnr_pred = psnr( img[None,None], center_scale_01(image = img_rec)[None,None] )
+    with torch.no_grad():
+        # compute prediction 
+        img, img_rec_eval, pred_img_eval = get_img_rec(sample, z_tilde, model = unet)
+        # Reconstruction error
+        rec_err = (sample - pred_img_eval).norm(p=2)
+        # compute psnr and ssim where reconstruction is clipped between 0 and 1
+        ssim_pred = ssim( img[None,None], img_rec_eval[None,None].clamp(0,1) )
+        psnr_pred = psnr( img[None,None], img_rec_eval[None,None].clamp(0,1) )
     # append to log
     app_log = pd.DataFrame( 
         {
@@ -177,7 +191,7 @@ for epoch in range(train_params["num_epochs"]):
         fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}".format(
             lr = init_lr, 
             gamma = train_params["scheduler_params"]["gamma"],
-            sampling_pattern = "circ_sr2.5e-1",
+            sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
         )
         if epoch < train_params["num_epochs"] - 1:
             torch.save(unet.state_dict(), path + "/DIP_UNet_adv_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) )
@@ -193,7 +207,8 @@ for epoch in range(train_params["num_epochs"]):
         
 # remove whitespace and plot tighter
 fig.tight_layout()
-fig.savefig(os.getcwd() + "/DIP_adv_evolution.png", bbox_inches="tight")
+save_path_dip_adv_rec = os.path.join(config.RESULTS_PATH, "..", "plots", "adversarial_plots", "DIP")
+fig.savefig(os.path.join(save_path_dip_adv_rec, "DIP_adv_evolution_%s_sr%.2f.png"%(sp_type, sampling_rate)), bbox_inches="tight")
 
 # save final reconstruction
 unet.eval()
@@ -201,4 +216,7 @@ img, img_rec, rec = get_img_rec(sample, z_tilde, model = unet)
 # center and normalize to x_hat in [0,1]
 img_rec = (img_rec - img_rec.min() )/ (img_rec.max() - img_rec.min() )
 from dip_utils import plot_train_DIP
-plot_train_DIP(img, img_rec, logging, save_fn = "DIP_adv_train_metrics.png")
+plot_train_DIP(img, img_rec, logging, save_fn = os.path.join(
+    save_path_dip_adv_rec,
+    "DIP_adv_train_metrics_%s_sr%.2f.png"%(sp_type, sampling_rate),
+)

@@ -92,7 +92,8 @@ class MaskFromFile(object):
         self.filename = filename
         # image should be in uint8 with values in [0, 1, ....,255]
         # shape (C, N, N)
-        image = read_image(path + filename)
+        joined_fn = os.path.join(path, filename)
+        image = read_image(joined_fn)
         self.mask = image.clone().detach() > 0 
         print('self.mask.shape: ', self.mask.shape)
 

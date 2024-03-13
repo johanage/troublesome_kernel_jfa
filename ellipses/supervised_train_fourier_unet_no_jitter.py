@@ -35,9 +35,14 @@ mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
 """
+sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
+sampling_rate = sr_list[4]
+print("sampling rate used is :", sampling_rate)
+sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.getcwd() + "/sampling_patterns/",
-    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
+    path = os.path.join(config.SP_PATH, "circle"),
+    #filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sr_list[int(sys.argv[1])])
+    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
 )
 mask = mask_fromfile.mask[None]
 # Fourier matrix
@@ -69,36 +74,35 @@ def loss_func(pred, tar):
         mseloss(pred, tar) / pred.shape[0]
     )
 
-
 train_phases = 2
-num_epochs = [1000, 200]
+num_epochs = [500, 90]
 lr_gamma = 0.96
 train_params = {
-    #"num_epochs": num_epochs, # fastmri, single-coil
-    "num_epochs" : [35,6], # ellipses
-    "batch_size": [10, 10], 
-    "loss_func": loss_func,
-    "save_path": [
+    "num_epochs": num_epochs, # fastmri, single-coil
+    #"num_epochs" : [35,6], # ellipses
+    "batch_size" : [10, 10], 
+    "loss_func"  : loss_func,
+    "save_path"  : [
         os.path.join(
             #config.RESULTS_PATH, # fastMRI data
             config.SCRATCH_PATH, # ellipses 
-            "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
-            #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256"
+            #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
+            "supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
     ],
-    "save_epochs": 1,
-    "optimizer": torch.optim.Adam,
-    "optimizer_params": [
+    "save_epochs"      : 10,
+    "optimizer"        : torch.optim.Adam,
+    "optimizer_params" : [
         {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
         # start where phase 1 left off
         {"lr": 1e-4*lr_gamma**num_epochs[0], "eps": 2e-4, "weight_decay": 1e-4},
     ],
-    "scheduler": torch.optim.lr_scheduler.StepLR,
-    "scheduler_params": {"step_size": 1, "gamma": lr_gamma},
-    "acc_steps": [1, 1],#200],
-    "train_transform": torchvision.transforms.Compose(
+    "scheduler"        : torch.optim.lr_scheduler.StepLR,
+    "scheduler_params" : {"step_size": 1, "gamma": lr_gamma},
+    "acc_steps"        : [1, 1],#200],
+    "train_transform"  : torchvision.transforms.Compose(
         [
             # flip first -> add imaginary part -> apply meas. operator
             v2.RandomHorizontalFlip(p=0.5),
@@ -107,11 +111,11 @@ train_params = {
             SimulateMeasurements(OpA), # simulate measurments with operator OpA - for MRI its the DFT
         ]
     ),
-    "val_transform": torchvision.transforms.Compose(
+    "val_transform"       : torchvision.transforms.Compose(
         [ToComplex(), SimulateMeasurements(OpA)],
     ),
-    "train_loader_params": {"shuffle": True, "num_workers": 8},
-    "val_loader_params": {"shuffle": False, "num_workers": 8},
+    "train_loader_params" : {"shuffle": True, "num_workers": 8},
+    "val_loader_params"   : {"shuffle": False, "num_workers": 8},
 }
 
 # ----- data configuration -----
@@ -145,11 +149,13 @@ unet = unet(**unet_params)
 
 # start from previously trained network
 """
-param_dir = "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
-file_param = "model_weights.pt"
-params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir, file_param) )
+param_dir      = "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+file_param     = "model_weights.pt"
+#params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir, file_param) )
+params_loaded  = torch.load(os.path.join(config.SCRATCH_PATH, param_dir, file_param) )
 unet.load_state_dict(params_loaded)
-"""
+#breakpoint()
+#"""
 
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)

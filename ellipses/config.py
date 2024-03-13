@@ -2,13 +2,16 @@ import os
 from data_management import sample_ellipses
 
 N = 256;
-#ROOT = "/home/johanfag/cs"
-#ROOT = "/itf-fi-ml/home/johanfag"
-ROOT = "/uio/hume/student-u56/johanfag"
-#DATA_PATH    = os.path.join(ROOT, "master/codebase/data/ellipses")
-DATA_PATH    = os.path.join(ROOT, "master/codebase/data/pytorch_datasets/fastMRI")
-RESULTS_PATH = os.path.join(ROOT, "master/codebase/troublesome_kernel_jfa/ellipses/models")
-SCRATCH_PATH = os.path.join("/mn/nam-shub-02/scratch/johanfag")
+ROOT_TUXEDO           = "/home/johanfag/cs"
+ROOT_IFI              = "/itf-fi-ml/home/johanfag"
+ROOT                  = "/uio/hume/student-u56/johanfag"
+TOY_DATA_PATH         = os.path.join(ROOT, "master/codebase/data/ellipses")
+DATA_PATH             = os.path.join(ROOT, "master/codebase/data/pytorch_datasets/fastMRI")
+RESULTS_PATH          = os.path.join(ROOT, "master/codebase/troublesome_kernel_jfa/ellipses/models")
+RESULTS_PATH_KADINGIR = "/mn/kadingir/afha_000000/nobackup/JohanAgerup/models"
+SCRATCH_PATH          = os.path.join("/mn/nam-shub-02/scratch/johanfag")
+# sampling pattern path
+SP_PATH          = os.path.join(ROOT, "master/codebase/troublesome_kernel_jfa/ellipses/sampling_patterns")
 # ----- random seeds -----
 torch_seed = 1
 numpy_seed = 2

@@ -15,15 +15,19 @@ gpu_avail = torch.cuda.is_available()
 if gpu_avail:
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
-
+sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
+sampling_rate = sr_list[3]
+print("sampling rate used is :", sampling_rate)
+sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.getcwd() + "/sampling_patterns/",
-    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
+    path = os.path.join(config.SP_PATH, "circle"),
+    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
 )
+mask = mask_fromfile.mask[None]
 # Fourier matrix
-OpA = Fourier(mask_fromfile.mask[None])
-OpA_m = Fourier_m(mask_fromfile.mask[None])
-inverter = LearnableInverterFourier(config.n, mask_fromfile.mask[None], learnable=False)
+OpA = Fourier(mask)
+OpA_m = Fourier_m(mask)
+inverter = LearnableInverterFourier(config.n, mask, learnable=False)
 
 # set device for operators
 OpA_m.to(device)
@@ -41,10 +45,14 @@ unet_params = {
 }
 unet = UNet
 unet = unet(**unet_params)
-#param_dir_phase1 = os.path.join(config.RESULTS_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_1/"
-param_dir_phase1 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_1/")
+method = "supervised"
+sampling_pattern_dir = "%s_sr%.2f"%(sp_type, sampling_rate)
+method_config = "Fourier_UNet_no_jitter_brain_fastmri_256"
+param_dir_phase1 = os.path.join(config.SCRATCH_PATH, method, sampling_pattern_dir, method_config, "train_phase_1")
+param_dir_phase2 = os.path.join(config.SCRATCH_PATH, method, sampling_pattern_dir, method_config, "train_phase_2")
+#param_dir_phase1 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_1/")
 #param_dir_phase2 = os.path.join(config.RESULTS_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
-param_dir_phase2 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_2/")
+#param_dir_phase2 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_2/")
 
 # get train and validation data
 data_dir = config.DATA_PATH
@@ -53,7 +61,7 @@ dir_train = os.path.join(data_dir, "train")
 dir_val = os.path.join(data_dir, "val")
 #"/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 # same as DIP
-v_tar = torch.load(os.path.join(dir_val,"sample_0.pt")).to(device)
+v_tar = torch.load(os.path.join(dir_train,"sample_00000.pt")).to(device)
 v_tar_complex = to_complex(v_tar[None]).to(device)
 measurement = OpA(v_tar_complex).to(device)[None]
 
@@ -68,17 +76,19 @@ measurement = OpA(v_tar_complex).to(device)[None]
 # plot stuff
 cmap = "Greys_r"
 isave = 0
-fn_evolution = "supervised_evolution_circ_sr0.25"
+fn_evolution = "supervised_evolution_%s_sr%.2f"%(sp_type, sampling_rate)
 plot_dir = os.path.join(config.RESULTS_PATH, "../plots/supervised")
 fig_evo, axs_evo = plt.subplots(2,10,figsize=(50,10) )
 [ax.set_axis_off() for ax in axs_evo.flatten()]
 
 # run evo
-for indices, param_dir in zip([ [0,6,12,15,18,24,30,35], [3, 6]], [param_dir_phase1, param_dir_phase2]):
+idx_phase1 = [10,100, 200, 300, 400, 500]
+idx_phase2 = [10, 50, 90]
+for indices, param_dir in zip([ idx_phase1, idx_phase2], [param_dir_phase1, param_dir_phase2]):
     for i in indices:
         if i > 0:
             file_param = "model_weights_epoch%i.pt"%i
-            params_loaded = torch.load(param_dir + file_param)
+            params_loaded = torch.load( os.path.join(param_dir, file_param) )
             unet.load_state_dict(params_loaded)
         v_pred = unet.forward(measurement)
         # plot evolution
@@ -89,20 +99,20 @@ for indices, param_dir in zip([ [0,6,12,15,18,24,30,35], [3, 6]], [param_dir_pha
         axs_evo[0,isave].imshow(impred, cmap=cmap)
         axs_evo[1,isave].imshow(imres, cmap=cmap)
         # add image eval metrics as text to residual row
-        # TODO: axs_evo[1,isave].text()
+        # TODO: add PSNR/SSIM or other image eval metric in text on image axs_evo[1,isave].text()
         isave +=1
 fig_evo.tight_layout()
 fig_evo.savefig(os.path.join(plot_dir, fn_evolution + ".png"), bbox_inches="tight")
 
 # load final net
 file_param = "model_weights.pt"
-params_loaded = torch.load(param_dir + file_param)
+params_loaded = torch.load(os.path.join(param_dir,file_param))
 unet.load_state_dict(params_loaded)
 # rec image
 imrec_final = unet.forward(measurement).norm(p=2,dim=(0,1))
 # plot and save final reconstruction 
 plt.figure(); plt.imshow(imrec_final.detach().cpu(), cmap=cmap); plt.axis("off")
-plt.savefig(os.path.join(plot_dir, "supervised_final_rec_circ_sr0.25.png"), bbox_inches="tight")
+plt.savefig(os.path.join(plot_dir, "supervised_final_rec_%s_sr%.2f.png"%(sp_type, sampling_rate)), bbox_inches="tight")
 # and original image
 plt.figure(); plt.imshow(v_tar.cpu(), cmap=cmap); plt.axis("off")
 plt.savefig(os.path.join(plot_dir, "supervised_orig_sample.png"), bbox_inches="tight")

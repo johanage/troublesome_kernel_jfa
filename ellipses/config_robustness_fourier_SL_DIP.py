@@ -456,7 +456,8 @@ _append_net(
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+        #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+        f"{config.SCRATCH_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -547,7 +548,8 @@ _append_net(
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
+        #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
+        f"{config.SCRATCH_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,

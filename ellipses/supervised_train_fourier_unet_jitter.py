@@ -78,7 +78,7 @@ def loss_func(pred, tar):
 
 
 train_phases = 2
-num_epochs = [0,100]
+num_epochs = [600,100]
 lr_gamma = 0.96
 jitter_params = {"eta" : 1e-1,  "scale_lo" : 0.0, "scale_hi" : 1.0}
 
@@ -90,7 +90,7 @@ train_params = {
     "loss_func": loss_func,
     "save_path": [
         os.path.join(
-            config.RESULTS_PATH,
+            config.SCRATCH_PATH,
             #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
             #"supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256"
             "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256"
@@ -117,7 +117,7 @@ train_params = {
             v2.RandomVerticalFlip(p=0.5),
             ToComplex(), # adds an imaginary part with elements set to zero 
             SimulateMeasurements(OpA), # simulate measurments with operator OpA - for MRI its the DFT
-            # add jitter
+            # jitter: add noise
             Jitter(**jitter_params),
         ]
     ),
@@ -157,7 +157,7 @@ with open(
 unet = unet(**unet_params)
 
 # start from previously trained network
-#"""
+"""
 param_dir = "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2"
 file_param = "model_weights.pt"
 params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir,file_param))
@@ -175,12 +175,13 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
 # run training
-#mod = False
-mod = True
+mod = False
+#mod = True
 if mod:
     train_params["save_path"] = [
         os.path.join(
-            config.RESULTS_PATH,
+            #config.RESULTS_PATH,
+            config.SCRATCH_PATH,
             "supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256"
             "eta_{eta:0.3f}_train_phase_{train_phase}".format(
                 eta = jitter_params["eta"],
@@ -198,13 +199,7 @@ for i in range(train_phases):
     if i == 1 and mod: 
         jit_trans = train_params_cur["train_transform"].transforms.pop() # remove jittering
         assert isinstance(jit_trans, Jitter), "popped the wrong transform, removed %s"%(type(jit_trans))
-    if i == 0:
-        # Make sure the filename corresponds to sample pattern!!!
-        train_params_cur["fn_evolution"] = "sr_0.25_brain256_evolution"
-        #train_params_cur["fn_evolution"] = "sr_0.25_ellipses256_evolution"
-        train_params_cur["plot_evolution"] = True
-    else:
-         train_params_cur["plot_evolution"] = False
+    # print train params
     print("Phase {}:".format(i + 1))
     for key, value in train_params_cur.items():
         print(key + ": " + str(value))
