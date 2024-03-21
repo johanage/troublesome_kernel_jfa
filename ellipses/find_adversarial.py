@@ -598,6 +598,17 @@ def grid_attack(
         # note that Y0 is Y0.shape[0] identical samples
         Xhat    = method.reconstr(y0 = Y_0[:1], net = method["net"], z_tilde = z_tilde)
         method.rec_config["xhat0"] = Xhat.repeat( Y_0.shape[0], *((X_0.ndim -1) * (1,)) )
+     
+    # for DeepDecoder networks we need to learn pre-trained network
+    if "DeepDecoder" in method.name:
+        # use same input name convention as for DIP to save space - TODO: use this same convention when defining DeepDecoder in the thesis
+        z_tilde = 10 * torch.rand( (1, method.rec_config["net_in_channels"],) + tuple([d//2**(method["net"].nscales-1) for d in X_0.shape[-2:]]) )
+        # save initialised model weights to be loaded in each reconstruction at each noise level
+        torch.save(method["net"].state_dict(), os.path.join(config.RESULTS_PATH, "DeepDecoder_init_adv_table.pt") )
+        # note that Y0 is Y0.shape[0] identical samples
+        Xhat    = method.reconstr(y0 = Y_0[:1], net = method["net"], z_tilde = z_tilde)
+        method.rec_config["xhat0"] = Xhat.repeat( Y_0.shape[0], *((X_0.ndim -1) * (1,)) )
+
 
     for idx_noise in reversed(range(len(noise_rel))):
         # perform the actual attack for "method" and current noise level
@@ -622,18 +633,31 @@ def grid_attack(
         if "DIP" in method.name:
             assrt_msg = "z_tilde not an argument in the DIP reconstruction function (note diff. form adv. rec. func)"
             assert "z_tilde" in method.reconstr.func.__code__.co_varnames, assrt_msg
-            # re-initialize model at zero noise level
+            # re-initialize model at zero noise level with the same weights each adv. attack
             params_init = torch.load(os.path.join(config.RESULTS_PATH, "DIP_x_UNet_init_adv_table.pt"))
             method["net"].load_state_dict(params_init)
             # update reconstruction function with re-initialised model and the same z_tilde as for every reconstruction
             method["reconstr"] = partial(method.reconstr, net = method["net"], z_tilde=z_tilde)
+
+        
+        # if DeepDecoder method net and z_tilde have to be added as an argument to the reconstruction function
+        if "DeepDecoder" in method.name:
+            assrt_msg = "z_tilde not an argument in the DeepDecoder reconstruction function (note diff. form adv. rec. func)"
+            assert "z_tilde" in method.reconstr.func.__code__.co_varnames, assrt_msg
+            # re-initialize model at zero noise level with the same weights each adv. attack
+            params_init = torch.load(os.path.join(config.RESULTS_PATH, "DeepDecoder_init_adv_table.pt"))
+            method["net"].load_state_dict(params_init)
+            # update reconstruction function with re-initialised model and the same z_tilde as for every reconstruction
+            method["reconstr"] = partial(method.reconstr, net = method["net"], z_tilde=z_tilde)
+        
         # compute adversarial and reference reconstruction
         # (noise level needs to be absolute)
         # DIP_x : this reconstructs the image xhat from measurements Y_adv_cur and Y_ref_cur
         X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
         # re-init net before reconstruction of reference measurement
-        if "DIP" in method.name:
+        if "DIP" in method.name or "DeepDecoder" in method.name:
             method["net"].load_state_dict(params_init)
+        
         X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
         
         # compute resulting reconstruction error according to err_measure

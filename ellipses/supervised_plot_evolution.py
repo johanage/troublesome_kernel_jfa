@@ -10,13 +10,15 @@ from operators import (
 )
 import config
 from operators import to_complex
+from piq import psnr, ssim
+
 # set device
 gpu_avail = torch.cuda.is_available()
 if gpu_avail:
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
-sampling_rate = sr_list[3]
+sampling_rate = sr_list[-1]
 print("sampling rate used is :", sampling_rate)
 sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
@@ -82,9 +84,15 @@ fig_evo, axs_evo = plt.subplots(2,10,figsize=(50,10) )
 [ax.set_axis_off() for ax in axs_evo.flatten()]
 
 # run evo
+idx_phase =  [10,100, 200, 300, 400, 500, 510, 560, 600]
 idx_phase1 = [10,100, 200, 300, 400, 500]
 idx_phase2 = [10, 50, 90]
-for indices, param_dir in zip([ idx_phase1, idx_phase2], [param_dir_phase1, param_dir_phase2]):
+
+# lambda function to compute real image from complex image
+abs_img = lambda  x : (x[0]**2 + x[1]**2)**.5
+
+#for indices, param_dir in zip([ idx_phase1, idx_phase2], [param_dir_phase1, param_dir_phase2]):
+for indices, param_dir in zip([idx_phase], [param_dir_phase1]):
     for i in indices:
         if i > 0:
             file_param = "model_weights_epoch%i.pt"%i
@@ -93,13 +101,14 @@ for indices, param_dir in zip([ idx_phase1, idx_phase2], [param_dir_phase1, para
         v_pred = unet.forward(measurement)
         # plot evolution
         pred_cpu = v_pred.detach().cpu()
-        abs_img = lambda  x : (x[0]**2 + x[1]**2)**.5
-        impred = abs_img(pred_cpu[0])
+        impred = abs_img(pred_cpu[0]).cpu()
         imres = impred - v_tar.detach().cpu()
         axs_evo[0,isave].imshow(impred, cmap=cmap)
         axs_evo[1,isave].imshow(imres, cmap=cmap)
         # add image eval metrics as text to residual row
-        # TODO: add PSNR/SSIM or other image eval metric in text on image axs_evo[1,isave].text()
+        rec_psnr = psnr(impred[None, None], v_tar.detach().cpu()[None, None]).cpu()
+        rec_ssim = ssim(impred[None, None], v_tar.detach().cpu()[None, None]).cpu()
+        axs_evo[1,isave].text(x = 5,y = 20, s = "PSNR : %.1f \nSSIM : %.2f"%(rec_psnr, rec_ssim), fontsize = 16)
         isave +=1
 fig_evo.tight_layout()
 fig_evo.savefig(os.path.join(plot_dir, fn_evolution + ".png"), bbox_inches="tight")

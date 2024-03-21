@@ -9,7 +9,7 @@ import pandas as pd, torch, torchvision, numpy as np
 from piq import psnr, ssim
 
 from data_management import IPDataset, SimulateMeasurements, ToComplex
-from networks import UNet
+from networks import UNet, DeepDecoder
 from operators import (
     Fourier,
     Fourier_matrix as Fourier_m,
@@ -23,7 +23,6 @@ from find_adversarial import (
     PGD,
     PAdam,
     PAdam_DIP_x,
-    PAdam_DIP_theta,
     untargeted_attack,
     grid_attack,
 )
@@ -131,12 +130,8 @@ def _attackerNet(
         rec = lambda y: _reconstructNet(y, net)
     # this can be changed to string instead of boolean condition if more learning paradigms are added
     else:
-        # setup DIP that computes new reconstructions implicitly using theta
-        if rec_config["reconstruction_method"] == "DIP_theta":
-            rec = rec_config["rec_func_adv_noise"]
-            rec = partial(rec, net = net)
         # setup for DIP that computes new reconstructions explicitly
-        if rec_config["reconstruction_method"] == "DIP_x":
+        if rec_config["reconstruction_method"] in ["DIP_x", "DeepDecoder"]:
             rec   = rec_config["rec_func_adv_noise"]
             # this is computed and added to the rec_config dict in the grid attack in find_adversarial.py
             xhat0 = rec_config["xhat0"]
@@ -198,10 +193,7 @@ def _attackerNet(
             )
         ]
         # perform untargeted attack
-        # TODO: make this work with DIP_x method
-        # - make flexible to different loss functions in find_adversarial.py
-        # - change from computing adversarial noise to adversarial example
-        if "DIP" in rec_config["reconstruction_method"]:
+        if "DIP" in rec_config["reconstruction_method"] or "DeepDecoder" in rec_config["reconstruction_method"]:
             xhat0_batch = xhat0[idx_batch : idx_batch + batch_size, ...]
             # update so that the reconstructed image 
             # xhat0 is returned in rec in the first iteration
@@ -284,10 +276,10 @@ def _append_net(
         "info"       : info,
         "reconstr"   : rec,
         "rec_config" : rec_config,
-        "attacker" : lambda x0, noise_rel, yadv_init=None, rec_config=rec_config: _attackerNet(
+        "attacker"   : lambda x0, noise_rel, yadv_init=None, rec_config=rec_config: _attackerNet(
             x0, noise_rel, net, yadv_init = yadv_init, adv_optim = adv_optim, rec_config = rec_config,
         ), 
-        "net": net,
+        "net"        : net,
     }
 
 # ----- DIP UNet configuration -----
@@ -315,8 +307,8 @@ _append_net(
     info = {
         "name_disp"     : "DIP UNet w/o noise",
         "name_save"     : "dip_unet_nojit_3_3",
-        "plt_color"     : "#3be383",
-        "plt_marker"    : "o",
+        "plt_color"     : "#b3b3b3",
+        "plt_marker"    : "d",
         "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
@@ -345,8 +337,8 @@ _append_net(
     info = {
         "name_disp"     : "DIP UNet 2/3",
         "name_save"     : "dip_unet_nojit_2_3",
-        "plt_color"     : "#3be340",
-        "plt_marker"    : "o",
+        "plt_color"     : "#5c5c5c",
+        "plt_marker"    : "s",
         "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
@@ -376,8 +368,8 @@ _append_net(
     info = {
         "name_disp"     : "DIP UNet 1/3",
         "name_save"     : "dip_unet_nojit_1_3",
-        "plt_color"     : "#9bf22a",
-        "plt_marker"    : "o",
+        "plt_color"     : "#000000",
+        "plt_marker"    : "^",
         "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
@@ -408,9 +400,9 @@ _append_net(
     info = {
         "name_disp"     : "DIP UNet w/ noise",
         "name_save"     : "dip_unet_jit_plus_jit_meas",
-        "plt_color"     : "#0cad2b",
-        "plt_marker"    : "p",
-        "plt_linestyle" : "-",
+        "plt_color"     : "#fc7272",
+        "plt_marker"    : "+",
+        "plt_linestyle" : "--",
         "plt_linewidth" : 2.75,
     },
     net = UNet(**dip_unet_params),
@@ -450,14 +442,13 @@ _append_net(
     {
         "name_disp"     : "Supervised UNet w/o noise",
         "name_save"     : "unet_no_jit",
-        "plt_color"     : "#023eff",
+        "plt_color"     : "#b0b0b0",
         "plt_marker"    : "d",
-        "plt_linestyle" : "--",
+        "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
-        f"{config.SCRATCH_PATH}/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+        f"{config.SCRATCH_PATH}/supervised/circle_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256/train_phase_1/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -488,9 +479,9 @@ _append_net(
     {
         "name_disp"     : "Supervised UNet w/ very high noise",
         "name_save"     : "unet_jit",
-        "plt_color"     : "#f22a86",
-        "plt_marker"    : "s",
-        "plt_linestyle" : "--",
+        "plt_color"     : "#000000",
+        "plt_marker"    : "^",
+        "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
     _load_net(
@@ -515,9 +506,9 @@ _append_net(
     {
         "name_disp"     : "Supervised UNet w/ high noise",
         "name_save"     : "unet_jit",
-        "plt_color"     : "#eb6152",
+        "plt_color"     : "#5c5c5c",
         "plt_marker"    : "s",
-        "plt_linestyle" : "--",
+        "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
     _load_net(
@@ -542,7 +533,7 @@ _append_net(
     {
         "name_disp"     : "Supervised UNet w/ low noise",
         "name_save"     : "unet_jit_low_noise",
-        "plt_color"     : "#eb79a8",
+        "plt_color"     : "#7e7e7e",
         "plt_marker"    : "x",
         "plt_linestyle" : "--",
         "plt_linewidth" : 2.75,
@@ -570,7 +561,7 @@ _append_net(
     {
         "name_disp"     : "Supervised UNet w/ noise mod",
         "name_save"     : "unet_jit_mod",
-        "plt_color"     : "#dbe14c",
+        "plt_color"     : "#fc7272",
         "plt_marker"    : "+",
         "plt_linestyle" : "--",
         "plt_linewidth" : 2.75,
@@ -590,3 +581,64 @@ _append_net(
 
     }
 )
+
+# ---------------- DeepDecoder ----------------
+#                  Adv. attack
+# --------- Network confiuguration
+num_channels = 5
+dim_channels = 128
+deep_decoder_params = {
+    "output_channels" : 2,                # 1 : grayscale, 2 : complex grayscale, 3 : RGB
+    "channels_up"     : [dim_channels]*num_channels,
+    "out_sigmoid"     : True,
+    "act_funcs"       : ["leakyrelu"]*num_channels,
+    "kernel_size"     : 1,                 # when using kernel size one we are not using convolution
+    "padding_mode"    : "reflect",
+    "upsample_sf"     : 2,                # upsample scale factor
+    "upsample_mode"   : "bilinear",
+    "upsample_first"  : True,
+}
+
+# optimization config for final reconstruction
+dd_nepochs             = 10000
+dd_optimizer_params    = {"lr": 5e-3, "eps": 1e-8, "weight_decay": 0}
+dd_f_optimizer         = lambda net_params, opt_params=dd_optimizer_params : torch.optim.Adam(net_params, **opt_params)
+dd_lr_scheduler_params = {"step_size": dd_nepochs//100, "gamma": 0.98}
+dd_f_lr_scheduler      = lambda optimizer, scheduler_params=dd_lr_scheduler_params : torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
+
+# config adv. loss objective
+loss_adv_partial = partial(loss_adv_example,  meas_op = OpA, beta = 1e-3)
+
+# NOTE: same adv. attack method as for DIP, i.e. PAdam_DIP_x
+# NOTE: same reconstruction method as for DIP, i.e. _reconstructDIP
+# NOTE: same adv. attack loss objective as for DIP, i.e. loss_adv_examle from dip_utils.py
+_append_net(
+    name = "DeepDecoder no jit",
+    info = {
+        "name_disp"     : "DeepDecoder w/o noise",
+        "name_save"     : "DeepDecoder",
+        "plt_color"     : "#b3b3b3",
+        "plt_marker"    : "d",
+        "plt_linestyle" : "-",
+        "plt_linewidth" : 2.75,
+    },
+    net = DeepDecoder(**deep_decoder_params),
+    adv_optim  = PAdam_DIP_x,
+    rec_config = {
+        "niter_adv_optim"         : 1000,
+        "reconstruction_method"   : "DeepDecoder",
+        "reconstruction_function" : partial(
+            _reconstructDIP,
+            f_optimizer = dd_f_optimizer,
+            f_scheduler = dd_f_lr_scheduler,
+            OpA         = OpA,
+            epochs      = dd_nepochs,
+        ),
+        "rec_func_adv_noise" : lambda y, xhat : xhat,
+        "codomain_distance"  : loss_adv_partial,
+        "batch_size"         : 1,
+        "net_in_channels"    : deep_decoder_params["channels_up"][0],
+        "save_ztilde"        : True,
+    }
+)
+

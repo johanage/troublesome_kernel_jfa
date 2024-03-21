@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable as mal
 import pandas as pd
 import torch
+from torch import nn
 from tqdm import tqdm
 from typing import Type
 # local imports
@@ -642,7 +643,92 @@ class UNet(InvNet):
             fig.colorbar(plot, cax=cax)
         return fig
 
-from torch import nn
+# Deep decoder
+class DeepDecoder(nn.Module):
+    def __init__(
+        self,
+        output_channels : int        = 2,                # 1 : grayscale, 2 : complex grayscale, 3 : RGB
+        channels_up     : list       = [128]*3,
+        out_sigmoid     : bool       = False,
+        act_funcs       : list[str]  = ["leakyrelu"]*3,
+        kernel_size     : int        = 1,                 # when using kernel size one we are not using convolution
+        padding_mode    : str        = "reflect",
+        upsample_sf     : int        = 2,                # upsample scale factor
+        upsample_mode   : str        = "bilinear",
+        upsample_first  : bool       = False,
+    ) -> None:
+        """
+        Args:
+         - 
+        Out: None
+        """
+        super(DeepDecoder, self).__init__()
+        assert len(channels_up) == len(act_funcs), "The specified channels in the upsampling layers must match the number of activation functions"
+        self.upsample     = torch.nn.Upsample(scale_factor = upsample_sf, mode = upsample_mode)
+        self.channels_up  = channels_up + [channels_up[-1], channels_up[-1]]
+        self.out_channels = output_channels
+        self.nscales      = len(channels_up)
+        self.out_sigmoid  = out_sigmoid
+        af_dict = {
+            "relu"      : nn.ReLU(), 
+            "leakyrelu" : nn.LeakyReLU(),
+        }
+        self.activation_functions = [af_dict[af_type] for af_type in act_funcs]
+        self.conv_modules = [nn.Conv2d(
+                in_channels  = self.channels_up[i], 
+                out_channels = self.channels_up[i+1],
+                kernel_size  = kernel_size,
+                padding_mode = padding_mode,
+
+            ) for i in range(len(self.channels_up)-1)]  
+        self.conv_modules = self.conv_modules + [nn.Conv2d(channels_up[-1], self.out_channels, kernel_size=1, padding_mode=padding_mode)]
+        self.batch_norm_modules = [nn.BatchNorm2d(
+                num_features = self.channels_up[i+1],
+                affine       = True, # true -> learnable affine parameters
+            ) 
+            for i in range(len(self.channels_up)-1)]
+        
+        # setup a sequential composition of all the layers
+        self.module_list = [] 
+        for i in range(self.nscales-1):
+            if upsample_first:
+                # decoder layer: conv -> upsample -> batch_norm
+                self.module_list.append( ("conv%i"%i, self.conv_modules[i]) )
+                self.module_list.append( ("upsample%i"%i, self.upsample)    )
+            else:
+                # decoder layer: upsample -> conv upsample -> batch_norm
+                self.module_list.append( ("upsample%i"%i, self.upsample)    )
+                self.module_list.append( ("conv%i"%i, self.conv_modules[i]) )
+
+            # no normalization of the last output
+            if i < self.nscales-1:
+                self.module_list.append( ("AF%i"%i, self.activation_functions[i]) )
+                self.module_list.append( ("BN%i"%i, self.batch_norm_modules[i])   )
+        # last layer
+        self.module_list.append( ("conv_last", self.conv_modules[-1]) )
+        if out_sigmoid:
+            self.module_list.append( ("sigmoid", nn.Sigmoid()) )
+        # setup network as seqential composition
+        self.net = nn.Sequential( OrderedDict(self.module_list) )
+
+    # forward function
+    def forward(
+        self,
+        inp : torch.Tensor,
+    ) -> torch.Tensor:
+        # change variable name because it is reused in conv-upsample composition
+        out = self.net(inp) 
+        return out
+    
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    def _add_to_progress_bar(self, dict):
+        """ Can be overwritten by child classes to add to progress bar. """
+        return dict
+
+# GANs
 class Generator(nn.Module):
     def __init__(
         self, 

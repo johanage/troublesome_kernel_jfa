@@ -4,7 +4,7 @@ from data_management import sample_ellipses
 N = 256;
 ROOT_TUXEDO           = "/home/johanfag/cs"
 ROOT_IFI              = "/itf-fi-ml/home/johanfag"
-ROOT                  = "/uio/hume/student-u56/johanfag"
+ROOT                  = "/uio/kant/geo-exports-u1/johanfag"
 TOY_DATA_PATH         = os.path.join(ROOT, "master/codebase/data/ellipses")
 DATA_PATH             = os.path.join(ROOT, "master/codebase/data/pytorch_datasets/fastMRI")
 RESULTS_PATH          = os.path.join(ROOT, "master/codebase/troublesome_kernel_jfa/ellipses/models")

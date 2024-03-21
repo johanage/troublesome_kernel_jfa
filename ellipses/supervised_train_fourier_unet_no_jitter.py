@@ -36,12 +36,11 @@ mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
 """
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
-sampling_rate = sr_list[4]
+sampling_rate = sr_list[-1]
 print("sampling rate used is :", sampling_rate)
 sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
     path = os.path.join(config.SP_PATH, "circle"),
-    #filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sr_list[int(sys.argv[1])])
     filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
 )
 mask = mask_fromfile.mask[None]
@@ -74,25 +73,24 @@ def loss_func(pred, tar):
         mseloss(pred, tar) / pred.shape[0]
     )
 
-train_phases = 2
-num_epochs = [500, 90]
+train_phases = 1
+num_epochs = [41, 0] # fastMRI
+#num_epochs = [10, 0]   # ellipses
 lr_gamma = 0.96
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
-    #"num_epochs" : [35,6], # ellipses
     "batch_size" : [10, 10], 
     "loss_func"  : loss_func,
     "save_path"  : [
         os.path.join(
-            #config.RESULTS_PATH, # fastMRI data
-            config.SCRATCH_PATH, # ellipses 
-            #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
-            "supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
+            config.SCRATCH_PATH,  
+            "supervised/ellipses/%s_sr%.2f/Fourier_UNet_no_jitter_ellipses_256"%(sp_type, sampling_rate),
+            #"supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
     ],
-    "save_epochs"      : 10,
+    "save_epochs"      : 4,
     "optimizer"        : torch.optim.Adam,
     "optimizer_params" : [
         {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
@@ -120,12 +118,14 @@ train_params = {
 
 # ----- data configuration -----
 train_data_params = {
-    "path": config.DATA_PATH,
+    #"path": config.DATA_PATH,    #fastMRI
+    "path": config.TOY_DATA_PATH, #ellipses
 }
 train_data = IPDataset
 
 val_data_params = {
-    "path": config.DATA_PATH,
+    #"path": config.DATA_PATH,    #fastMRI
+    "path": config.TOY_DATA_PATH, #ellipses
 }
 val_data = IPDataset
 
@@ -167,12 +167,6 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # measurement y has shape (2, m) since y in C^m
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
-
-# test network reconstruction 
-#tar = val_data[0][0]
-#measurement = OpA(tar)
-#rec = unet(measurement[None].to(device))
-#assert 0
 
 # run training 
 for i in range(train_phases):

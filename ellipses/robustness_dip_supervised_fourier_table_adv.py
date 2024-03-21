@@ -19,15 +19,16 @@ import config_robustness_fourier_SL_DIP as cfg_rob
 methods = cfg_rob.methods
 # select reconstruction methods
 methods_include = [
+    "DeepDecoder no jit",
     #"DIP UNet no jit",
     #"DIP UNet no jit 2/3 iterations",
     #"DIP UNet no jit 1/3 iterations",
     #"DIP UNet jit",
-    "Supervised UNet no jit",
-    "Supervised UNet jit",
-    "Supervised UNet jit low noise",
-    "Supervised UNet jit mod",
-    "Supervised UNet jit very high noise",
+    #"Supervised UNet no jit",
+    #"Supervised UNet jit",
+    #"Supervised UNet jit low noise",
+    #"Supervised UNet jit mod",
+    #"Supervised UNet jit very high noise",
     #'L1',
     #"UNet it no jit",
     #"UNet it jit mod",
@@ -44,7 +45,7 @@ methods_no_calc = [
     "DIP UNet jit",
     "Supervised UNet no jit",
     "Supervised UNet jit",
-    #"Supervised UNet jit low noise",
+    "Supervised UNet jit low noise",
     "Supervised UNet jit mod",
     "Supervised UNet jit very high noise",
     #'L1',
@@ -254,18 +255,16 @@ if do_plot:
     for a in (ax, ax_std):
         a.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
         a.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])
-        a.legend(loc="upper left", fontsize=12)
+        a.legend(loc="best", fontsize=10)
 
     if save_plot:
         fig.savefig(
-            #os.path.join(save_path, "fig_table_adv.pdf"), bbox_inches="tight"
-            #os.path.join(save_path, "fig_table_adv_dip.pdf"), bbox_inches="tight"
-            os.path.join(save_path, "fig_table_adv_supervised.pdf"), bbox_inches="tight"
+            os.path.join(save_path, "fig_table_adv_dip.pdf"), bbox_inches="tight"
+            #os.path.join(save_path, "fig_table_adv_supervised.pdf"), bbox_inches="tight"
         )
         fig_std.savefig(
-            #os.path.join(save_path, "fig_table_adv_std.pdf"), bbox_inches="tight"
-            #os.path.join(save_path, "fig_table_adv_std_dip.pdf"), bbox_inches="tight"
-            os.path.join(save_path, "fig_table_adv_std_supervised.pdf"), bbox_inches="tight"
+            os.path.join(save_path, "fig_table_adv_std_dip.pdf"), bbox_inches="tight"
+            #os.path.join(save_path, "fig_table_adv_std_supervised.pdf"), bbox_inches="tight"
         )
     plt.show()
 
