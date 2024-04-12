@@ -478,7 +478,7 @@ _append_net(
     "Supervised UNet jit very high noise",
     {
         "name_disp"     : "Supervised UNet w/ very high noise",
-        "name_save"     : "unet_jit",
+        "name_save"     : "unet_jit_very_high_noise",
         "plt_color"     : "#000000",
         "plt_marker"    : "^",
         "plt_linestyle" : "-",
@@ -505,7 +505,7 @@ _append_net(
     "Supervised UNet jit",
     {
         "name_disp"     : "Supervised UNet w/ high noise",
-        "name_save"     : "unet_jit",
+        "name_save"     : "unet_jit_high_noise",
         "plt_color"     : "#5c5c5c",
         "plt_marker"    : "s",
         "plt_linestyle" : "-",
@@ -617,9 +617,9 @@ _append_net(
     info = {
         "name_disp"     : "DeepDecoder w/o noise",
         "name_save"     : "DeepDecoder",
-        "plt_color"     : "#b3b3b3",
-        "plt_marker"    : "d",
-        "plt_linestyle" : "-",
+        "plt_color"     : "#000000",
+        "plt_marker"    : ".",
+        "plt_linestyle" : "dashdot",
         "plt_linewidth" : 2.75,
     },
     net = DeepDecoder(**deep_decoder_params),

@@ -1,3 +1,4 @@
+import numpy as np
 from matplotlib import pyplot as plt
 import torch
 import pandas as pd
@@ -46,6 +47,8 @@ def plot_train_DIP(
             # plot logloss for better inspection - change of base to 10
             val = torch.log(torch.tensor(val)) / torch.log(torch.tensor(10) )
             key = "log-" + key
+        if "rel" in key:
+            axs[3 + i].set_ylim(-3,0)
         axs[3 + i].plot(val)
         axs[3 + i].set_title(key)
     

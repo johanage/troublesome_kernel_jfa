@@ -26,6 +26,7 @@ OpA_m = Fourier_m(mask_fromfile.mask[None])
 inverter = LearnableInverterFourier(config.n, mask_fromfile.mask[None], learnable=False)
 
 # set device for operators
+OpA.to(device)
 OpA_m.to(device)
 inverter.to(device)
 
@@ -47,6 +48,7 @@ file_param = "model_weights.pt"
 params_loaded = torch.load(param_dir_phase2 + file_param)
 unet.load_state_dict(params_loaded)
 unet.eval()
+unet.to(device)
 
 # get train and validation data
 dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
@@ -99,7 +101,7 @@ adversarial_noise = PAdam(
     loss        = loss_adv_partial,
     t_in        = adv_noise_init,
     projs       = [projection_l2],
-    iter        = 10,
+    niter        = 10,
     stepsize    = 1e-4,
     silent      = False,
 )

@@ -7,11 +7,13 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable as mal
 import pandas as pd
 import torch
 from torch import nn
+import torchvision
+import copy
 from tqdm import tqdm
 from typing import Type
 # local imports
 from operators import l2_error, to_complex
-
+from data_management import AddDetail, Jitter
 # ------- Lipshitz constant ----------------
 def local_lipshitz(
     network      : torch.nn.Module,
@@ -187,21 +189,33 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         batch_size,
         loss_func,
         save_path,
-        save_epochs=50,
-        optimizer=torch.optim.Adam,
-        optimizer_params={"lr": 2e-4, "eps": 1e-3},
-        scheduler=torch.optim.lr_scheduler.StepLR,
-        scheduler_params={"step_size": 1, "gamma": 1.0},
-        acc_steps=1,
-        train_transform=None,
-        val_transform=None,
-        train_loader_params={"shuffle": True},
-        val_loader_params={"shuffle": False},
+        save_epochs         = 50,
+        optimizer           = torch.optim.Adam,
+        optimizer_params    = {"lr": 2e-4, "eps": 1e-3},
+        scheduler           = torch.optim.lr_scheduler.StepLR,
+        scheduler_params    = {"step_size": 1, "gamma": 1.0},
+        acc_steps           = 1,
+        train_transform     = None,
+        val_transform       = None,
+        train_loader_params = {"shuffle": True},
+        val_loader_params   = {"shuffle": False},
     ):
         optimizer = optimizer(self.parameters(), **optimizer_params)
         scheduler = scheduler(optimizer, **scheduler_params)
 
-        train_data.transform = train_transform
+        # check if details are added to specific images - then trickery must be done to the datatransforms
+        add_detail = [x for x in train_transform.transforms if isinstance(x, AddDetail)]
+        # if list is not empty
+        if add_detail:
+            if isinstance(train_transform.transforms[-1], Jitter):
+                jitter = train_transform.transforms.pop()
+            train_data.transform = train_transform
+            train_data.transform_wdetail = torchvision.transforms.v2.Compose(copy.deepcopy(train_data.transform.transforms))
+            [train_data.transform.transforms.remove(x) for x in add_detail]
+            train_data.transform.transforms.append(jitter)
+            train_data.transform_wdetail.transforms.append(jitter)
+        else:
+            train_data.transform = train_transform
         val_data.transform = val_transform
         train_loader_params = dict(train_loader_params)
         val_loader_params = dict(val_loader_params)
@@ -608,8 +622,10 @@ class UNet(InvNet):
 
         # training and validation loss
         subs[0, 0].set_title("Losses")
-        subs[0, 0].semilogy(logging["loss"], label="train")
-        subs[0, 0].semilogy(logging["val_loss"], label="val")
+        #subs[0, 0].semilogy(logging["loss"], label="rel train")
+        subs[0, 0].semilogy(logging["rel_l2_error"], label="rel train")
+        #subs[0, 0].semilogy(logging["val_loss"], label="rel val")
+        subs[0, 0].semilogy(logging["val_rel_l2_error"], label="rel val")
         subs[0, 0].legend()
    
         # validation input
@@ -644,6 +660,7 @@ class UNet(InvNet):
         return fig
 
 # Deep decoder
+# architecture design taken from https://github.com/reinhardh/supplement_deep_decoder
 class DeepDecoder(nn.Module):
     def __init__(
         self,

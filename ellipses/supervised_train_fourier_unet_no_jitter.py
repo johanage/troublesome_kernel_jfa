@@ -40,8 +40,10 @@ sampling_rate = sr_list[-1]
 print("sampling rate used is :", sampling_rate)
 sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.path.join(config.SP_PATH, "circle"),
-    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
+    path = os.path.join(config.SP_PATH, sp_type), # circular pattern
+    #path = config.SP_PATH,
+    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
+    #filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
 )
 mask = mask_fromfile.mask[None]
 # Fourier matrix
@@ -74,9 +76,10 @@ def loss_func(pred, tar):
     )
 
 train_phases = 1
-num_epochs = [41, 0] # fastMRI
+num_epochs = [300, 0] # fastMRI
 #num_epochs = [10, 0]   # ellipses
-lr_gamma = 0.96
+lr_gamma = 0.98
+lr_scheduler_step = 10
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
     "batch_size" : [10, 10], 
@@ -84,8 +87,8 @@ train_params = {
     "save_path"  : [
         os.path.join(
             config.SCRATCH_PATH,  
-            "supervised/ellipses/%s_sr%.2f/Fourier_UNet_no_jitter_ellipses_256"%(sp_type, sampling_rate),
-            #"supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
+            #"supervised/ellipses/%s_sr%.2f/Fourier_UNet_no_jitter_ellipses_256"%(sp_type, sampling_rate),
+            "supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
@@ -98,8 +101,8 @@ train_params = {
         {"lr": 1e-4*lr_gamma**num_epochs[0], "eps": 2e-4, "weight_decay": 1e-4},
     ],
     "scheduler"        : torch.optim.lr_scheduler.StepLR,
-    "scheduler_params" : {"step_size": 1, "gamma": lr_gamma},
-    "acc_steps"        : [1, 1],#200],
+    "scheduler_params" : {"step_size": lr_scheduler_step, "gamma": lr_gamma},
+    "acc_steps"        : [1, 1],
     "train_transform"  : torchvision.transforms.Compose(
         [
             # flip first -> add imaginary part -> apply meas. operator
@@ -117,15 +120,15 @@ train_params = {
 }
 
 # ----- data configuration -----
+datapath = config.DATA_PATH # fastMRI
+#datapath = config.TOY_DATA_PATH # ellipses
 train_data_params = {
-    #"path": config.DATA_PATH,    #fastMRI
-    "path": config.TOY_DATA_PATH, #ellipses
+    "path": datapath,
 }
 train_data = IPDataset
 
 val_data_params = {
-    #"path": config.DATA_PATH,    #fastMRI
-    "path": config.TOY_DATA_PATH, #ellipses
+    "path": datapath,
 }
 val_data = IPDataset
 
@@ -148,10 +151,9 @@ with open(
 unet = unet(**unet_params)
 
 # start from previously trained network
-"""
-param_dir      = "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+#"""
+param_dir      = "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2"
 file_param     = "model_weights.pt"
-#params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir, file_param) )
 params_loaded  = torch.load(os.path.join(config.SCRATCH_PATH, param_dir, file_param) )
 unet.load_state_dict(params_loaded)
 #breakpoint()

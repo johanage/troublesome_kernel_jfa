@@ -11,7 +11,10 @@ RESULTS_PATH          = os.path.join(ROOT, "master/codebase/troublesome_kernel_j
 RESULTS_PATH_KADINGIR = "/mn/kadingir/afha_000000/nobackup/JohanAgerup/models"
 SCRATCH_PATH          = os.path.join("/mn/nam-shub-02/scratch/johanfag")
 # sampling pattern path
-SP_PATH          = os.path.join(ROOT, "master/codebase/troublesome_kernel_jfa/ellipses/sampling_patterns")
+SP_PATH    = os.path.join(ROOT, "master/codebase/troublesome_kernel_jfa/ellipses/sampling_patterns")
+# plot path
+PLOT_PATH  = os.path.join(ROOT, "master", "codebase", "troublesome_kernel_jfa", "ellipses", "plots")     
+
 # ----- random seeds -----
 torch_seed = 1
 numpy_seed = 2

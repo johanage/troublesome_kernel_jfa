@@ -51,7 +51,7 @@ method = "supervised"
 sampling_pattern_dir = "%s_sr%.2f"%(sp_type, sampling_rate)
 method_config = "Fourier_UNet_no_jitter_brain_fastmri_256"
 param_dir_phase1 = os.path.join(config.SCRATCH_PATH, method, sampling_pattern_dir, method_config, "train_phase_1")
-param_dir_phase2 = os.path.join(config.SCRATCH_PATH, method, sampling_pattern_dir, method_config, "train_phase_2")
+#param_dir_phase2 = os.path.join(config.SCRATCH_PATH, method, sampling_pattern_dir, method_config, "train_phase_2")
 #param_dir_phase1 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_1/")
 #param_dir_phase2 = os.path.join(config.RESULTS_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
 #param_dir_phase2 = os.path.join(config.SCRATCH_PATH, "supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256train_phase_2/")
@@ -63,7 +63,7 @@ dir_train = os.path.join(data_dir, "train")
 dir_val = os.path.join(data_dir, "val")
 #"/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
 # same as DIP
-v_tar = torch.load(os.path.join(dir_train,"sample_00000.pt")).to(device)
+v_tar = torch.load(os.path.join(dir_val,"sample_00000.pt")).to(device)
 v_tar_complex = to_complex(v_tar[None]).to(device)
 measurement = OpA(v_tar_complex).to(device)[None]
 
@@ -106,9 +106,9 @@ for indices, param_dir in zip([idx_phase], [param_dir_phase1]):
         axs_evo[0,isave].imshow(impred, cmap=cmap)
         axs_evo[1,isave].imshow(imres, cmap=cmap)
         # add image eval metrics as text to residual row
-        rec_psnr = psnr(impred[None, None], v_tar.detach().cpu()[None, None]).cpu()
-        rec_ssim = ssim(impred[None, None], v_tar.detach().cpu()[None, None]).cpu()
-        axs_evo[1,isave].text(x = 5,y = 20, s = "PSNR : %.1f \nSSIM : %.2f"%(rec_psnr, rec_ssim), fontsize = 16)
+        rec_psnr = psnr(impred[None, None].clamp(0,1), v_tar.detach().cpu()[None, None]).cpu()
+        rec_ssim = ssim(impred[None, None].clamp(0,1), v_tar.detach().cpu()[None, None]).cpu()
+        axs_evo[1,isave].text(x = 5,y = 20, s = "PSNR : %.1f \nSSIM : %.2f"%(rec_psnr, rec_ssim), fontsize = 16, color = "white")
         isave +=1
 fig_evo.tight_layout()
 fig_evo.savefig(os.path.join(plot_dir, fn_evolution + ".png"), bbox_inches="tight")

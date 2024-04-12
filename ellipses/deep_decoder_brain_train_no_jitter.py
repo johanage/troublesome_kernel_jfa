@@ -13,6 +13,7 @@ from piq import psnr, ssim
 from data_management import IPDataset, SimulateMeasurements, ToComplex
 from networks import DeepDecoder
 from operators import (
+    to_complex,
     Fourier,
     Fourier_matrix as Fourier_m,
     LearnableInverterFourier,
@@ -54,11 +55,15 @@ inverter.to(device)
 # ----- network configuration -----
 num_channels = 5
 dim_channels = 128
-# unet-inspired architecture
-channels_up = [128, 64, 32, 64, 128]#[dim_channels]*num_channels
+archdict = {
+    "unetinsp1" : [128, 64, 32, 64, 128], 
+    "unetinsp2" : [128, 128, 64, 64, 128], 
+    "flat"      : [dim_channels]*num_channels,
+}
+archkey = "flat"
 deep_decoder_params = {
     "output_channels" : 2,                # 1 : grayscale, 2 : complex grayscale, 3 : RGB
-    "channels_up"     : channels_up,
+    "channels_up"     : archdict[archkey],
     "out_sigmoid"     : True,
     "act_funcs"       : ["leakyrelu"]*num_channels,
     "kernel_size"     : 1,                 # when using kernel size one we are not using convolution
@@ -78,7 +83,7 @@ def loss_func(pred, tar):
     )
 
 # set training parameters
-num_epochs = 8000 # sampling rate experiment DeepDecoder epoch nr
+num_epochs = 10000 # sampling rate experiment DeepDecoder epoch nr
 init_lr = 5e-3
 train_params = {
     "num_epochs": num_epochs,
@@ -96,8 +101,16 @@ train_params = {
 }
 
 # ------ construct network and train -----
+fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_k{dim_channels}_nc{num_channels}_{architecture}".format(
+    lr               = init_lr, 
+    gamma            = train_params["scheduler_params"]["gamma"],
+    sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
+    dim_channels     = dim_channels,
+    num_channels     = num_channels,
+    architecture     = archkey,
+)
 # directory of init weights and biases
-fn_init_weights = os.path.join(train_params["save_path"],"DeepDecoder_init_weights_%s_%.2f.pt"%(sp_type, sampling_rate) )
+fn_init_weights = os.path.join(train_params["save_path"],"DeepDecoder_init_weights_%s.pt"%(fn_suffix) )
 # if not done before, save the initial deep_decoder weights and biases
 if not os.path.isfile(fn_init_weights):
     torch.save(deep_decoder.state_dict(), fn_init_weights)
@@ -120,9 +133,7 @@ dir_val   = os.path.join(config.DATA_PATH, "val")
 # Load one sample to train network on
 sample = torch.load(os.path.join(dir_train,"sample_00000.pt"))
 # sample is real valued so make fake imaginary part
-sample = sample[None].repeat(2,1,1)
-# set imaginary values to zero
-sample[1]   = torch.zeros_like(sample[1])
+sample = to_complex(sample[None])
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement[None].to(device)
@@ -134,7 +145,7 @@ input_range = [0,10]
 # torch.rand : u ~ U([0,1] so for input_range=[a,b] we get a + b * u ~ U([a,b])
 ddinput = input_range[0] + input_range[1] * torch.rand((1, deep_decoder_params["channels_up"][0],in_hw, in_hw))
 # save ddinput in case needed for adv. noise study
-torch.save(ddinput, os.path.join(train_params["save_path"], "ddinput_%s_%.2f.pt"%(sp_type, sampling_rate)) )
+torch.save(ddinput, os.path.join(train_params["save_path"], "ddinput_%s.pt"%(fn_suffix)) )
 ddinput = ddinput.to(device)
 
 # optimizer setup
@@ -165,13 +176,7 @@ progress_bar = tqdm(
 isave = 0
 ###### Save parameters of DeepDecoder model
 path = train_params["save_path"]
-fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_k{dim_channels}_nc{num_channels}".format(
-    lr               = init_lr, 
-    gamma            = train_params["scheduler_params"]["gamma"],
-    sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
-    dim_channels     = dim_channels,
-    num_channels     = num_channels,
-)
+
 
 # prepare reference image
 og_complex_img = sample.cpu()[None]
@@ -272,16 +277,17 @@ for epoch in range(train_params["num_epochs"]):
             # reconstruct image at epoch
             #pred_img_eval = deep_decoder.forward(model_input).cpu()
             pred_img_eval = deep_decoder.forward(ddinput).cpu().detach()
-            img_rec = pred_img_eval.norm(p=2, dim=(0,1))
-
+            img_rec = pred_img_eval[0].norm(p=2, dim=0)
+            # add image eval metrics as text to residual row
+            rec_psnr = psnr(img_rec[None, None].clamp(0,1), og_img.detach().cpu())
+            rec_ssim = ssim(img_rec[None, None].clamp(0,1), og_img.detach().cpu())
             ###### Plot evolution of training process #######
             cmap = "Greys_r"
             axs[0,isave].imshow(img_rec, cmap=cmap)
             #axs[0,isave].set_title("Epoch %i"%epoch)
-            # using log makes small errors large and negative and large erros small and negative
-            #axs[1,isave].imshow(.5*torch.log( (og_img[0,0] - img_rec)**2), cmap=cmap)
             axs[1,isave].imshow((og_img[0,0] - img_rec).abs(), cmap=cmap)
             axs[0,isave].set_axis_off(); axs[1,isave].set_axis_off()
+            axs[1,isave].text(x = 5,y = 20, s = "PSNR : %.1f \nSSIM : %.2f"%(rec_psnr, rec_ssim), fontsize = 16)
             isave += 1
         
 # save the logging table to pickle

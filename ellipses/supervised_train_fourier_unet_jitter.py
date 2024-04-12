@@ -42,11 +42,18 @@ mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
 """
+sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
+sampling_rate = sr_list[-1]
+print("sampling rate used is :", sampling_rate)
+sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.getcwd() + "/sampling_patterns/",
-    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png"
+    path = os.path.join(config.SP_PATH, sp_type), # circular pattern
+    #path = config.SP_PATH,
+    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
+    #filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
 )
 mask = mask_fromfile.mask[None]
+
 # Fourier matrix
 OpA_m = Fourier_m(mask)
 # Fourier operator
@@ -76,16 +83,12 @@ def loss_func(pred, tar):
         mseloss(pred, tar) / pred.shape[0]
     )
 
-
 train_phases = 2
-num_epochs = [600,100]
+num_epochs = [500,100]
 lr_gamma = 0.96
 jitter_params = {"eta" : 1e-1,  "scale_lo" : 0.0, "scale_hi" : 1.0}
-
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
-    #"num_epochs" : [35,6], # ellipses
-    #"batch_size": [10, 10], # fastmri single-coil
     "batch_size": [10, 10], # ellipses
     "loss_func": loss_func,
     "save_path": [
@@ -93,7 +96,9 @@ train_params = {
             config.SCRATCH_PATH,
             #"supervised/circ_sr0.25/Fourier_UNet_no_jitter_ellipses_256"
             #"supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256"
-            "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256"
+            #"supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256"
+            #"supervised/%s_sr%.2f/Fourier_UNet_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
+            "supervised/%s_sr%.2f/Fourier_UNet_jitter_mod_brain_fastmri_256"%(sp_type, sampling_rate),
             "eta_{eta:0.3f}_train_phase_{train_phase}".format(
                 eta = jitter_params["eta"],
                 train_phase = (i + 1) % (train_phases + 1)),
@@ -156,9 +161,10 @@ with open(
 # ------ construct network and train -----
 unet = unet(**unet_params)
 
-# start from previously trained network
+# Regular jittering : start from previously trained network
+# Modified jittering : start from pre-trained high noise jittering network
 """
-param_dir = "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2"
+param_dir = "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_10.000_train_phase_2"
 file_param = "model_weights.pt"
 params_loaded = torch.load(os.path.join(config.RESULTS_PATH, param_dir,file_param))
 unet.load_state_dict(params_loaded)
@@ -175,21 +181,7 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
 # run training
-mod = False
-#mod = True
-if mod:
-    train_params["save_path"] = [
-        os.path.join(
-            #config.RESULTS_PATH,
-            config.SCRATCH_PATH,
-            "supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256"
-            "eta_{eta:0.3f}_train_phase_{train_phase}".format(
-                eta = jitter_params["eta"],
-                train_phase = (i + 1) % (train_phases + 1)),
-        )
-        for i in range(train_phases + 1)
-    ]
-
+mod = True # activate/deactivate modified jittering: low noise -> no noise
 for i in range(train_phases):
     train_params_cur = {}
     for key, value in train_params.items():

@@ -6,7 +6,6 @@ import torch
 
 #from fastmri_utils.data import transforms
 from tqdm import tqdm
-
 from operators import to_complex
 torch.device("cpu")
 
@@ -216,6 +215,7 @@ class IPDataset(torch.utils.data.Dataset):
         self.path = path
         self.files = glob.glob(os.path.join(path, subset, "*.pt"))
         self.transform = transform
+        self.transform_wdetail = None
         self.device = device
 
     def __len__(self):
@@ -227,10 +227,40 @@ class IPDataset(torch.utils.data.Dataset):
             out = (torch.load(self.files[idx]).unsqueeze(0).to(self.device),)
         else:
             out = (torch.load(self.files[idx]).unsqueeze(0),)
-        return self.transform(out) if self.transform is not None else out
+        if self.transform is not None:
+            out_trans = self.transform(out)
+            if self.transform_wdetail is not None:
+                idx_add_detail = [x.idx for x in self.transform_wdetail.transforms if isinstance(x, AddDetail)]
+                fn_det_img = os.path.join("/", *self.files[0].split("/")[:-1], "sample_%.5i.pt"%idx_add_detail[0])
+                iter_idx_add_detail = self.files.index(fn_det_img)
+                if idx == iter_idx_add_detail:
+                    out_trans = self.transform_wdetail(out)
+        else:
+            out_trans = out
+        return out_trans
 
 
 # ----- data transforms -----
+class AddDetail(object):
+    """ 
+    Adds detail to sample_idx
+
+    Parameters
+    ----------
+    idx    : integer
+        The index of the sample to which the detail is added.
+    detail : torch.tensor
+        Complex valued tensor representing the detail close to or in 
+        the nullspace of the measurement operator A.
+    """
+
+    def __init__(self, idx, detail):
+        self.idx    = idx
+        self.detail = detail
+
+    def __call__(self, target):
+        (target,) = target
+        return target + self.detail
 
 class SimulateMeasurements(object):
     """ Forward operator on target samples.
@@ -323,9 +353,9 @@ class Jitter(object):
         )
         # distribution condition
         if distr == "normal":
-            noise = torch.randn(meas.shape, generator=self.trng).to(meas.device)
+            noise = np.sqrt(1/2)*torch.randn(meas.shape, generator=self.trng).to(meas.device)
         elif distr == "uniform":
-            noise = torch.rand(meas.shape, generator=self.trng).to(meas.device)
+            noise = np.sqrt(1/2)*torch.rand(meas.shape, generator=self.trng).to(meas.device)
         else:
             raise ValueError("invalid distribution choice for jitter-transform")
         meas_noisy = meas + self.eta / np.sqrt(m) * noise * scale
@@ -335,7 +365,6 @@ class Jitter(object):
 # ---- run data generation -----
 if __name__ == "__main__":
     import config
-
     np.random.seed(config.numpy_seed)
     torch.manual_seed(config.torch_seed)
     create_iterable_dataset(

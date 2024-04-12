@@ -1,14 +1,23 @@
+# general imports
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from scipy.io import savemat
+import os
 
-idx = 968;
+# personal imports
+import config
+
+savedir     = os.path.join(config.DATA_PATH, "val")
+savedir_toy = os.path.join(config.TOY_DATA_PATH, "val")
+plotdir     = os.path.join(config.PLOT_PATH, "add_text")
+
+idx = "00042"
 
 fname = f'sample_{idx}.pt'
-
-data = torch.load(fname);
+loadfn = os.path.join(savedir, fname)
+data = torch.load(loadfn);
 
 print(data.dtype)
 
@@ -22,18 +31,17 @@ fsize = 13;
 draw = ImageDraw.Draw(im);
 font = ImageFont.truetype('/usr/share/fonts/dejavu/DejaVuSans.ttf', fsize);
 text_intensity = 140
-draw.text((195,150), "SIAM", (text_intensity,), font=font);
-#draw.text((20,40), "read me?", (text_intensity,), font=font);
-#im.show()
-im.save(f'sample_N_256_{idx}.png');
+draw.text((125,125), "CANCER", (text_intensity,), font=font);
+im.save(os.path.join(plotdir, f'sample_N_256_{idx}.png') );
 np_im = np.asarray(im, dtype='float32')/255;
 
 new_data = torch.from_numpy(np_im);
 print(new_data.dtype)
 
 fname_out = f"sample_{idx}_text"
-torch.save(new_data, fname_out+'.pt');
-savemat(fname_out+'.mat', {'data': new_data})
+savefn = os.path.join(savedir, fname_out)
+torch.save(new_data, "%s.pt"%savefn);
+savemat(os.path.join(savedir, fname_out+'.mat'), {'data': new_data})
 
 
 
