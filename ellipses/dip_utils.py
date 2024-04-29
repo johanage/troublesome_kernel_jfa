@@ -63,7 +63,16 @@ def get_img_rec(sample, z_tilde, model):
      - reconstruction : complex reconstruction, aka raw output of model
      - img_rec        : real part of reconstructed image
     """
-    img = torch.sqrt(sample[0]**2 + sample[1]**2).to("cpu")
+    if sample.dim() == 3: 
+       img = torch.sqrt(sample[0]**2 + sample[1]**2).to("cpu")
+    elif sample.dim() == 4 and sample.shape[0] == 1:
+        img = sample.norm(p=2, dim=(0,1))
+    elif sample.dim() == 4 and sample.shape[0] > 1:
+        img = sample.norm(p=2, dim=1)
+        print("Sample is a batch of samples")
+    else:
+        img = sample
+    assert img.dim() <= 4, "img dim is too large"
     reconstruction = model.forward(z_tilde)
     img_rec = torch.sqrt(reconstruction[0,0]**2 + reconstruction[0,1]**2).detach().to("cpu")
     return img, img_rec, reconstruction

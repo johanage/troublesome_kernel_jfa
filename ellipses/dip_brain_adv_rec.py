@@ -2,7 +2,7 @@
 import os
 import matplotlib as mpl
 import torch
-import torchvision
+from torchvision.utils import save_image
 from piq import psnr, ssim
 # local imports
 from data_management import IPDataset, SimulateMeasurements, ToComplex
@@ -39,8 +39,11 @@ sampling_rate = sr_list[-1]
 print("sampling rate used is :", sampling_rate)
 sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.path.join(config.SP_PATH, "circle"),
-    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
+    #path = os.path.join(config.SP_PATH, "circle"),
+    #filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
+    # -------- a=2 Samplig patterns --------------------
+    path = config.SP_PATH,
+    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png",
 )
 
 # Fourier matrix
@@ -76,44 +79,61 @@ def loss_func(pred, tar):
     )
 
 # set training parameters
-num_epochs = 30000
-init_lr = 5e-4
+num_epochs = 20000
+init_lr = 1e-4
+savedir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2", "adv_rec")
+if not os.path.exists(savedir):
+    os.makedirs(savedir)
 train_params = {
     "num_epochs": num_epochs,
     "batch_size": 1,
     "loss_func": loss_func,
-    "save_path": os.path.join(config.RESULTS_PATH,"DIP/adv_attack"),
+    "save_path": savedir,
     "save_epochs": num_epochs//10,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
-    "scheduler_params": {"step_size": num_epochs//100, "gamma": 0.96},
+    "scheduler_params": {"step_size": 100, "gamma": 0.99},
     "acc_steps": 1,
 }
 
 # JFA's local dir
 dir_train = os.path.join(config.DATA_PATH, "train")
 dir_val   = os.path.join(config.DATA_PATH, "val")
-# load sample that DIP has been trained on
-sample = torch.load( os.path.join(dir_train,"sample_00000.pt") )
 from operators import to_complex
 # go from real to complex valued sample - set imag part to zero
-sample = to_complex(sample[None]).to(device)
+# load sample that DIP has been trained on
+sample = torch.load( os.path.join(dir_val,"sample_00021_text.pt") )
+sample = to_complex(sample[None, None]).to(device)
 
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
-measurement = measurement[None].to(device)
+measurement = measurement.to(device)
 # load the adversarial noise (measurement adv noise)
-adv_noise = torch.load(os.path.join(os.getcwd(), "adv_attack_dip", "adv_noise_dip_x_%s_sr%.2f.pt"%(sp_type, sampling_rate)) )
+#adv_noise = torch.load(os.path.join(os.getcwd(), "adv_attack_dip", "adv_noise_dip_x_%s_sr%.2f.pt"%(sp_type, sampling_rate)) )
+noiserel = 8e-2
+perturbed_measurement = torch.load(os.path.join(
+    os.getcwd(), 
+    "adv_attack_dip", 
+    "adv_example_noiserel%.2f_DIP_UNet_nojit_lr_0.0001_gamma_0.99_step_100_sp_%s_sr%.2f_a2_last.pt"%(noiserel, sp_type, sampling_rate)
+) )
 # compute perturbed measurement
-perturbed_measurement = measurement + adv_noise
+#perturbed_measurement = measurement + adv_noise
 
-# load same init weights as was used to find the reconstruction 
-# that was the initial condition of the adversarial attack
-param_dir = os.path.join(config.SCRATCH_PATH, "DIP")
-unet.load_state_dict(torch.load( os.path.join(param_dir, "DIP_UNet_init_weights_%s_%.2f.pt"%(sp_type, sampling_rate)) ) )
+# temp dir with network weights and z_tilde
+#param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP")
+param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2")
 
-# load the z_tilde used in pre-trained weights and to find aversarial noise
+# init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
 z_tilde = torch.load(os.path.join(param_dir, "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
 z_tilde = z_tilde.to(device)
+
+# load model weights
+file_param = "DIP_UNet_nojit_lr_0.0001_gamma_0.99_step_100_sp_%s_sr%.2f_a2_last.pt"%(sp_type, sampling_rate)
+#params_loaded = torch.load( os.path.join(param_dir, file_param) )
+params_loaded = torch.load( os.path.join(param_dir, "DIP_UNet_init_weights_%s_%.2f.pt"%(sp_type, sampling_rate)) )
+unet.load_state_dict(params_loaded)
+with torch.no_grad():
+    unet.eval()
+    save_image(unet.forward(z_tilde).cpu().norm(p=2, dim=(0,1)), os.path.join(param_dir, "xhat0_before_adv_rec.png") )
 
 # optimizer setup
 optimizer = torch.optim.Adam
@@ -139,7 +159,16 @@ fig, axs = plt.subplots(2,num_save,figsize=(5*num_save,10) )
 # function that returns img of sample and the reconstructed image
 from dip_utils import get_img_rec#, center_scale_01
 
-# training loop
+###### Save parameters of DIP model
+path = train_params["save_path"]
+fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_noiserel{noiserel}".format(
+    lr               = init_lr, 
+    gamma            = train_params["scheduler_params"]["gamma"],
+    sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
+    noiserel         = "%i"%(int(100*noiserel)),
+)
+
+# -------- training loop ---------------------------------
 isave = 0
 # magnitude of added gaussian noise during training
 sigma_p = 1/30
@@ -159,22 +188,27 @@ for epoch in range(train_params["num_epochs"]):
     scheduler.step()
     
     # compute logging metrics, first prepare predicted image
-    unet.eval()
     with torch.no_grad():
+        unet.eval()
         # compute prediction 
-        img, img_rec_eval, pred_img_eval = get_img_rec(sample, z_tilde, model = unet)
+        #img, img_rec_eval, pred_img_eval = get_img_rec(sample, z_tilde, model = unet)
+        img = sample.norm(p=2, dim=(0,1)).cpu()
+        pred_img_eval = unet.forward(z_tilde).cpu()
+        img_rec_eval = pred_img_eval.norm(p=2, dim=(0,1))
         # Reconstruction error
-        rec_err = (sample - pred_img_eval).norm(p=2)
+        rec_err = (sample.cpu() - pred_img_eval).norm(p=2)
         # compute psnr and ssim where reconstruction is clipped between 0 and 1
         ssim_pred = ssim( img[None,None], img_rec_eval[None,None].clamp(0,1) )
         psnr_pred = psnr( img[None,None], img_rec_eval[None,None].clamp(0,1) )
     # append to log
     app_log = pd.DataFrame( 
         {
-            "loss" : loss.item(), 
-            "lr"   : scheduler.get_last_lr()[0],
-            "psnr" : psnr_pred,
-            "ssim" : ssim_pred,
+            "loss"        : loss.item(), 
+            "lr"          : scheduler.get_last_lr()[0],
+            "psnr"        : psnr_pred,
+            "ssim"        : ssim_pred,
+            "rec_err"     : rec_err.item(),
+            "rel_rec_err" : (rec_err.item() / sample.norm(p=2) ).item(),
         }, 
         index = [0] )
     logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
@@ -186,15 +220,10 @@ for epoch in range(train_params["num_epochs"]):
     )
     if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
         print("Saving parameters of models and plotting evolution")
-        ###### Save parameters of DIP model
-        path = train_params["save_path"]
-        fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}".format(
-            lr = init_lr, 
-            gamma = train_params["scheduler_params"]["gamma"],
-            sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
-        )
+        
         if epoch < train_params["num_epochs"] - 1:
             torch.save(unet.state_dict(), path + "/DIP_UNet_adv_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) )
+            save_image(img_rec_eval.cpu(), path + "/DIP_UNet_adv_rec_{suffix}_epoch{epoch}.png".format(suffix = fn_suffix, epoch=epoch) )
             ###### Plot evolution of training process #######
             cmap = "Greys_r"
             axs[0,isave].imshow(img_rec, cmap=cmap)
@@ -204,10 +233,26 @@ for epoch in range(train_params["num_epochs"]):
             isave += 1       
         else:
             torch.save(unet.state_dict(), path + "/DIP_UNet_adv_{suffix}_last.pt".format(suffix = fn_suffix) )
-        
+            # save last rec img
+            torch.save(pred_img_eval.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_last.pt".format(
+                suffix = fn_suffix,
+            )))
+            save_image(img_rec_eval.cpu(), path + "/DIP_UNet_adv_rec_{suffix}_last.png".format(suffix = fn_suffix) )
+
+# save the logging table to pickle
+save_logging = True
+if save_logging:
+    logging.to_pickle(os.path.join(path, "DIP_UNet_nojit_logging_{suffix}.pkl".format(suffix = fn_suffix)))
+# load logging
+else:
+    logging = pd.read_pickle(os.path.join(path, "DIP_UNet_nojit_logging_{suffix}.pkl".format(suffix = fn_suffix)))
+   
 # remove whitespace and plot tighter
 fig.tight_layout()
-save_path_dip_adv_rec = os.path.join(config.RESULTS_PATH, "..", "plots", "adversarial_plots", "DIP")
+save_path_dip_adv_rec = os.path.join(config.PLOT_PATH, "adversarial_plots", "DIP", "noiserel%i"%( int(noiserel*100) ) )
+if not os.path.exists(save_path_dip_adv_rec):
+    os.makedirs(save_path_dip_adv_rec)
+
 fig.savefig(os.path.join(save_path_dip_adv_rec, "DIP_adv_evolution_%s_sr%.2f.png"%(sp_type, sampling_rate)), bbox_inches="tight")
 
 # save final reconstruction
@@ -216,7 +261,7 @@ img, img_rec, rec = get_img_rec(sample, z_tilde, model = unet)
 # center and normalize to x_hat in [0,1]
 img_rec = (img_rec - img_rec.min() )/ (img_rec.max() - img_rec.min() )
 from dip_utils import plot_train_DIP
-plot_train_DIP(img, img_rec, logging, save_fn = os.path.join(
+plot_train_DIP(img.cpu(), img_rec.cpu(), logging, save_fn = os.path.join(
     save_path_dip_adv_rec,
     "DIP_adv_train_metrics_%s_sr%.2f.png"%(sp_type, sampling_rate),
-)
+))

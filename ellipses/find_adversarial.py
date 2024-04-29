@@ -274,7 +274,6 @@ def PAdam_DIP_x(
         t_in.requires_grad = False
         optimizer_xhat.zero_grad()
         # update the net parameters minimizing the DIP loss function
-        # TODO: implement _closure  s.t. loss function can handle both xhat and t_in as arguments
         xhat_loss = loss(t_in, xhat)
         xhat_loss.backward()
         # update dip net parameter
@@ -495,7 +494,7 @@ def untargeted_attack(
         # computing codomain distance between reconstructed t and reference output
         # i.e. rec. image from perturbed meas. xhat and GT image x0
         # t_out     - reconstructed image
-        # t_out_rec - GT image
+        # t_out_ref - GT image
         loss = -weights[1] * codomain_dist(t_out, t_out_ref)
         if domain_dist is not None:
             loss += weights[0] * domain_dist(transform(t_in), t_in_ref)
@@ -609,7 +608,7 @@ def grid_attack(
         Xhat    = method.reconstr(y0 = Y_0[:1], net = method["net"], z_tilde = z_tilde)
         method.rec_config["xhat0"] = Xhat.repeat( Y_0.shape[0], *((X_0.ndim -1) * (1,)) )
 
-
+    # NOTE: start at the highest noise level (range is reversed)
     for idx_noise in reversed(range(len(noise_rel))):
         # perform the actual attack for "method" and current noise level
         print(
@@ -620,6 +619,7 @@ def grid_attack(
         )
 
         # compute adversarial examples
+        # NOTE: untrained networks are parallelised here but NOT during reconstruction
         if (keep_init == 0) or (idx_noise == (len(noise_rel) - 1)):
             Y_adv_cur, Y_ref_cur, Y_0_cur = method.attacker(
                 X_0, noise_rel[idx_noise], yadv_init = None, rec_config = method.rec_config,
@@ -650,20 +650,28 @@ def grid_attack(
             # update reconstruction function with re-initialised model and the same z_tilde as for every reconstruction
             method["reconstr"] = partial(method.reconstr, net = method["net"], z_tilde=z_tilde)
         
-        # compute adversarial and reference reconstruction
+        #-------- compute adversarial and reference reconstruction --------------
+        # set dimensions of X_adv_cur and X_ref_cur
+        X_adv_cur = torch.zeros_like(X_0)
+        X_ref_cur = torch.zeros_like(X_0)
         # (noise level needs to be absolute)
-        # DIP_x : this reconstructs the image xhat from measurements Y_adv_cur and Y_ref_cur
-        X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
-        # re-init net before reconstruction of reference measurement
         if "DIP" in method.name or "DeepDecoder" in method.name:
-            method["net"].load_state_dict(params_init)
+            # NOTE: reconstruct different perturbed measurement ONE AT A TIME
+            for i in range(Y_adv_cur.shape[0]):
+                # DIP_x : this reconstructs the image xhat from measurements Y_adv_cur and Y_ref_cur
+                X_adv_cur[i:i+1] = method.reconstr(Y_adv_cur[i:i+1])#, noise_rel[idx_noise])
+                # re-init net before reconstruction of reference measurement
+                method["net"].load_state_dict(params_init)
+                X_ref_cur[i:i+1] = method.reconstr(Y_ref_cur[i:i+1])#, noise_rel[idx_noise])
+        else:
+            X_adv_cur = method.reconstr(Y_adv_cur)#, noise_rel[idx_noise])
+            X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
         
-        X_ref_cur = method.reconstr(Y_ref_cur)#, noise_rel[idx_noise])
         
         # compute resulting reconstruction error according to err_measure
         shape_x0_repeat = (1,)*(X_0.ndim)
-        if "DIP" in method.name:
-            shape_x0_repeat = X_0.shape[:1] + (1,)*(X_0.ndim-1)
+        #if "DIP" in method.name:
+        #    shape_x0_repeat = X_0.shape[:1] + (1,)*(X_0.ndim-1)
         X_adv_err[idx_noise, ...] = err_measure(X_adv_cur.repeat(*shape_x0_repeat), X_0)
         X_ref_err[idx_noise, ...] = err_measure(X_ref_cur.repeat(*shape_x0_repeat), X_0)
         print('X_adv_cur.shape: ', X_adv_cur.shape)

@@ -8,6 +8,7 @@ from piq import psnr, ssim
 from data_management import IPDataset, SimulateMeasurements, ToComplex
 from networks import DeepDecoder
 from operators import (
+    to_complex,
     Fourier,
     Fourier_matrix as Fourier_m,
     LearnableInverterFourier,
@@ -33,14 +34,18 @@ sampling_rate = sr_list[-1]
 print("sampling rate used is :", sampling_rate)
 sp_type = "circle" # "diamond", "radial"
 mask_fromfile = MaskFromFile(
-    path = os.path.join(config.SP_PATH, "circle"),
-    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
+    # -------- a=1 Samplig patterns --------------------
+    #path = os.path.join(config.SP_PATH, "circle"), 
+    #filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
+    # -------- a=2 Samplig patterns --------------------
+    path = config.SP_PATH,
+    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png",
 )
-
+mask = mask_fromfile.mask[None]
 # Fourier matrix
-OpA_m = Fourier_m(mask_fromfile.mask[None])
+OpA_m = Fourier_m(mask)
 # Fourier operator
-OpA = Fourier(mask_fromfile.mask[None])
+OpA = Fourier(mask)
 # set device for operators
 OpA_m.to(device)
 
@@ -101,31 +106,36 @@ train_params = {
 # JFA's local dir
 dir_train = os.path.join(config.DATA_PATH, "train")
 dir_val   = os.path.join(config.DATA_PATH, "val")
-# load sample that DeepDecoder has been trained on
-sample = torch.load( os.path.join(dir_train,"sample_00000.pt") )
-from operators import to_complex
-# go from real to complex valued sample - set imag part to zero
-sample = to_complex(sample[None]).to(device)
+# load sample that DeepDecoder has been trained on - same as DIP
+sample_idx = 21
+tar = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) ).to(device)
+sample = to_complex(tar[None, None]).to(device)
+measurement = OpA(sample).to(device)
 
-# simulate measurements by applying the Fourier transform
-measurement = OpA(sample)
-measurement = measurement[None].to(device)
-# load the adversarial noise (measurement adv noise)
-fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_k{dim_channels}_nc{num_channels}_{architecture}".format(
-    lr               = init_lr,
-    gamma            = train_params["scheduler_params"]["gamma"],
+# directory from network weights etc.
+param_dir = os.path.join(config.RESULTS_PATH_KADINGIR,"DeepDecoder", "%s_sr%.2f_a2"%(sp_type, sampling_rate))
+# Deep decoder fn structure
+fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_k{dim_channels}_nc{num_channels}_{architecture}{additional}".format(
+    lr               = 0.005,
+    gamma            = 0.98,
     sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
     dim_channels     = dim_channels,
     num_channels     = num_channels,
     architecture     = archkey,
+    #additional       = "",                                  # a=1 multilevel sampling patterns
+    additional       = "_a2",                                # a=2 multilevel sampling patterns
 )
-adv_noise = torch.load(os.path.join(os.getcwd(), "adv_attack_dd", "adv_noise_dd_%s.pt"%(fn_suffix) ) )
+# -------- Load adversarial example ----------------------------------
+noise_rel = 6e-2
+file_param = "DeepDecoder_nojit_%s_last.pt"%(fn_suffix)
+perturbed_measurement = torch.load(os.getcwd() + "/adv_attack_dd/adv_example_noiserel%.2f_%s"%(noise_rel, file_param))
+# -------- Load adversarial noise ----------------------------------
+#adv_noise = torch.load(os.path.join(os.getcwd(), "adv_attack_dd", "adv_noise_dd_%s.pt"%(fn_suffix) ) )
 # compute perturbed measurement
-perturbed_measurement = measurement + adv_noise
+#perturbed_measurement = measurement + adv_noise
 
 # load same init weights as was used to find the reconstruction 
 # that was the initial condition of the adversarial attack
-param_dir = os.path.join(config.SCRATCH_PATH, "DeepDecoder")
 deep_decoder.load_state_dict(torch.load( os.path.join(param_dir, "DeepDecoder_init_weights_%s.pt"%(fn_suffix) ) ) )
 
 # Deep decoder input
@@ -177,23 +187,26 @@ for epoch in range(train_params["num_epochs"]):
     scheduler.step()
     
     # compute logging metrics, first prepare predicted image
-    deep_decoder.eval()
     with torch.no_grad():
+        deep_decoder.eval()
         # compute prediction 
-        
         img, img_rec_eval, pred_img_eval = get_img_rec(sample, ddinput, model = deep_decoder)
+        img = img.cpu(); img_rec_eval = img_rec_eval.cpu(); pred_img_eval = pred_img_eval.cpu();
         # Reconstruction error
-        rec_err = (sample - pred_img_eval).norm(p=2)
+        rec_err = (sample.cpu() - pred_img_eval).norm(p=2)
+        rel_rec_err = (rec_err.item() / tar.cpu().norm(p=2) ).item()
         # compute psnr and ssim where reconstruction is clipped between 0 and 1
         ssim_pred = ssim( img[None,None], img_rec_eval[None,None].clamp(0,1) )
         psnr_pred = psnr( img[None,None], img_rec_eval[None,None].clamp(0,1) )
     # append to log
     app_log = pd.DataFrame( 
         {
-            "loss" : loss.item(), 
-            "lr"   : scheduler.get_last_lr()[0],
-            "psnr" : psnr_pred,
-            "ssim" : ssim_pred,
+            "loss"          : loss.item(), 
+            "lr"            : scheduler.get_last_lr()[0],
+            "psnr"          : psnr_pred,
+            "ssim"          : ssim_pred,
+            "rec_err"       : rec_err.item(),
+            "rel_rec_err"   : rel_rec_err,
         }, 
         index = [0] )
     logging = pd.concat([logging, app_log], ignore_index=True, sort=False)
@@ -201,8 +214,10 @@ for epoch in range(train_params["num_epochs"]):
     # update progress bar
     progress_bar.update(1)
     progress_bar.set_postfix(
-        **deep_decoder._add_to_progress_bar({"loss": loss.item()})
-    )
+        **deep_decoder._add_to_progress_bar({
+            "loss"        : loss.item(),
+            "rel_rec_err" : rel_rec_err,
+    }))
     if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
         print("Saving parameters of models and plotting evolution")
         ###### Save parameters of DeepDecoder model
@@ -221,16 +236,16 @@ for epoch in range(train_params["num_epochs"]):
         
 # remove whitespace and plot tighter
 fig.tight_layout()
-save_path_dd_adv_rec = os.path.join(config.RESULTS_PATH, "..", "plots", "adversarial_plots", "DeepDecoder")
-fig.savefig(os.path.join(save_path_dd_adv_rec, "DeepDecoder_adv_evolution_%s_sr%.2f.png"%(sp_type, sampling_rate)), bbox_inches="tight")
+save_path_dd_adv_rec = os.path.join(config.PLOT_PATH, "adversarial_plots", "DeepDecoder", "noiserel%i"%(int(noise_rel*100)) )
+if not os.path.exists(save_path_dd_adv_rec):
+    os.makedirs(save_path_dd_adv_rec)
+fig.savefig(os.path.join(save_path_dd_adv_rec, "DeepDecoder_adv_evolution_%s_sr%.2f_%s.png"%(sp_type, sampling_rate, fn_suffix)), bbox_inches="tight")
 
 # save final reconstruction
 deep_decoder.eval()
 img, img_rec, rec = get_img_rec(sample, ddinput, model = deep_decoder) 
-# center and normalize to x_hat in [0,1]
-img_rec = (img_rec - img_rec.min() )/ (img_rec.max() - img_rec.min() )
 from dip_utils import plot_train_DIP
-plot_train_DIP(img, img_rec, logging, save_fn = os.path.join(
+plot_train_DIP(img.cpu(), img_rec.cpu(), logging, save_fn = os.path.join(
     save_path_dd_adv_rec,
-    "DeepDecoder_adv_train_metrics_%s_sr%.2f.png"%(sp_type, sampling_rate),
+    "DeepDecoder_adv_train_metrics_%s_sr%.2f_%s.png"%(sp_type, sampling_rate, fn_suffix),
 ))

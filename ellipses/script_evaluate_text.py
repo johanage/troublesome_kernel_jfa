@@ -20,10 +20,10 @@ from config_robustness_fourier_SL_DIP import methods
 device = cfg_rob.device
 torch.manual_seed(1)
 
-save_path = os.path.join(config.RESULTS_PATH, "attacks")
 save_plot = True
 # select samples
 sample = "00042"
+save_path = os.path.join(config.RESULTS_PATH, "attacks", "example_S%s"%sample)
 
 # dynamic range for plotting & similarity indices
 v_min = 0.0
@@ -39,10 +39,10 @@ methods_include = [
     #"DIP UNet no jit 1/3 iterations",
     #"DIP UNet jit",
     "Supervised UNet no jit",
-    #"Supervised UNet jit",
-    #"Supervised UNet jit low noise",
-    "Supervised UNet jit mod",
-    #"Supervised UNet jit very high noise",
+    "Supervised UNet jit",
+    "Supervised UNet jit low noise",
+    #"Supervised UNet jit mod",
+    "Supervised UNet jit very high noise",
     #'L1',
 ]
 
@@ -152,8 +152,8 @@ for (idx, method) in methods.iterrows():
         axins = ax.inset_axes(
             [0.05, 0.75, 0.4,0.2],
         )
-        axins.set_xlim(123,180)
-        axins.set_ylim(115,130)
+        axins.set_xlim(143,180)
+        axins.set_ylim(135,150)
         # plot the reconstruction in the inset 
         _implot(axins, X_rec, **{"extent" : extent, "origin" : "upper"})
         axins.spines["bottom"].set_color("#a1c9f4")

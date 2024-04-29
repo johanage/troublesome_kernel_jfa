@@ -294,10 +294,10 @@ dip_unet_params = {
 }
 
 # optimization config for final reconstruction
-dip_nepochs             = 30000
-dip_optimizer_params    = {"lr": 5e-4, "eps": 1e-8, "weight_decay": 0}
+dip_nepochs             = 20000
+dip_optimizer_params    = {"lr": 1e-4, "eps": 1e-8, "weight_decay": 0}
 dip_f_optimizer         = lambda net_params, opt_params=dip_optimizer_params : torch.optim.Adam(net_params, **opt_params)
-dip_lr_scheduler_params = {"step_size": dip_nepochs//100, "gamma": 0.96} 
+dip_lr_scheduler_params = {"step_size": 100, "gamma": 0.99} 
 dip_f_lr_scheduler      = lambda optimizer, scheduler_params=dip_lr_scheduler_params : torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
 
 from functools import partial
@@ -448,7 +448,8 @@ _append_net(
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        f"{config.SCRATCH_PATH}/supervised/circle_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256/train_phase_1/"
+        #f"{config.SCRATCH_PATH}/supervised/circle_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256/train_phase_1/"
+        f"{config.RESULTS_PATH_KADINGIR}/supervised/circle_sr0.25_a2/Fourier_UNet_no_jitter_brain_fastmri_256/train_phase_1/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -462,17 +463,8 @@ _append_net(
 
     }
 )
-supervised_unet_params = {
-    "in_channels"   : 2,
-    "drop_factor"   : 0.0,
-    "base_features" : 32,
-    "out_channels"  : 2,
-    "operator"      : OpA_m,
-    "inverter"      : inverter,
-    "upsampling"    : "nearest",
-}
-# with jittering
 
+# ----------- with jittering -------------------------------------------------------------------------------------------------
 # jittering level p=100
 _append_net(
     "Supervised UNet jit very high noise",
@@ -485,7 +477,8 @@ _append_net(
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_100.000_train_phase_2/"
+        #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_100.000_train_phase_2/"
+        f"{config.RESULTS_PATH_KADINGIR}/supervised/circle_sr0.25_a2/Fourier_UNet_jitter_brain_fastmri_256/eta_100.000_train_phase_1/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -512,7 +505,8 @@ _append_net(
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_10.000_train_phase_2/"
+        #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_10.000_train_phase_2/"
+        f"{config.RESULTS_PATH_KADINGIR}/supervised/circle_sr0.25_a2/Fourier_UNet_jitter_brain_fastmri_256/eta_10.000_train_phase_1/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -540,7 +534,8 @@ _append_net(
     },
     _load_net(
         #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
-        f"{config.SCRATCH_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
+        #f"{config.SCRATCH_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2/"
+        f"{config.RESULTS_PATH_KADINGIR}/supervised/circle_sr0.25_a2/Fourier_UNet_jitter_brain_fastmri_256/eta_0.100_train_phase_1/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -567,7 +562,8 @@ _append_net(
         "plt_linewidth" : 2.75,
     },
     _load_net(
-        f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256eta_10.000_train_phase_2/"
+        #f"{config.RESULTS_PATH}/supervised/circ_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256eta_10.000_train_phase_2/"
+        f"{config.RESULTS_PATH_KADINGIR}/supervised/circle_sr0.25_a2/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1/"
         + "model_weights.pt",
         UNet,
         supervised_unet_params,
@@ -603,7 +599,7 @@ deep_decoder_params = {
 dd_nepochs             = 10000
 dd_optimizer_params    = {"lr": 5e-3, "eps": 1e-8, "weight_decay": 0}
 dd_f_optimizer         = lambda net_params, opt_params=dd_optimizer_params : torch.optim.Adam(net_params, **opt_params)
-dd_lr_scheduler_params = {"step_size": dd_nepochs//100, "gamma": 0.98}
+dd_lr_scheduler_params = {"step_size": 100, "gamma": 0.98}
 dd_f_lr_scheduler      = lambda optimizer, scheduler_params=dd_lr_scheduler_params : torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
 
 # config adv. loss objective
@@ -633,6 +629,7 @@ _append_net(
             f_scheduler = dd_f_lr_scheduler,
             OpA         = OpA,
             epochs      = dd_nepochs,
+            sigma_p     = 1/50,
         ),
         "rec_func_adv_noise" : lambda y, xhat : xhat,
         "codomain_distance"  : loss_adv_partial,

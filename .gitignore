@@ -1,6 +1,7 @@
 *__pycache__
 *png
 ellipses/models
+ellipses/plots
 r/
 out_nohup*
 *.pt

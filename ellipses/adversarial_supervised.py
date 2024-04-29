@@ -1,5 +1,8 @@
 from matplotlib import pyplot as plt
 import os, sys, torch, numpy as np
+from torchvision.utils import save_image
+from copy import deepcopy
+# --- Local imports ------------
 from networks import UNet
 from operators import (
     Fourier,
@@ -26,7 +29,7 @@ OpA_m = Fourier_m(mask_fromfile.mask[None])
 inverter = LearnableInverterFourier(config.n, mask_fromfile.mask[None], learnable=False)
 
 # set device for operators
-OpA.to(device)
+#OpA.to(device)
 OpA_m.to(device)
 inverter.to(device)
 
@@ -38,48 +41,61 @@ unet_params = {
     "out_channels"  : 2,
     "operator"      : OpA_m,
     "inverter"      : inverter,
+    "upsampling"   : "nearest",
 }
-unet = UNet
-unet = unet(**unet_params)
-param_dir_phase1 = os.getcwd() + "/models/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_1/"
-param_dir_phase2 = os.getcwd() + "/models/supervised/circ_sr0.25/Fourier_UNet_no_jitter_brain_fastmri_256train_phase_2/"
+unet = UNet(**unet_params)
+#param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "supervised", "circle_sr0.25_a2", "Fourier_UNet_no_jitter_brain_fastmri_256", "train_phase_1")
+eta = 25
+param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "supervised", "circle_sr0.25_a2", "Fourier_UNet_jitter_mod_brain_fastmri_256", "eta_%.3f_train_phase_1"%eta)
+#param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "supervised", "circle_sr0.25_a2", "Fourier_UNet_jitter_brain_fastmri_256", "eta_%.3f_train_phase_1"%eta)
 # load model weights
 file_param = "model_weights.pt"
-params_loaded = torch.load(param_dir_phase2 + file_param)
+params_loaded = torch.load(os.path.join(param_dir, file_param) )
 unet.load_state_dict(params_loaded)
-unet.eval()
 unet.to(device)
 
 # get train and validation data
-dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
-dir_val = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/val/"
+dir_train = os.path.join(config.DATA_PATH, "train")
+dir_val = os.path.join(config.DATA_PATH, "val")
 
 # same as DIP
-v_tar = torch.load(dir_val + "sample_00000.pt").to(device)
-v_tar_complex = to_complex(v_tar[None]).to(device)
-measurement = OpA(v_tar_complex).to(device)[None]
-
-from find_adversarial import PGD, PAdam
+sample_idx = 21
+v_tar = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) ).to(device)
+v_tar_complex = to_complex(v_tar[None, None]).to(device)
+measurement = OpA(v_tar_complex).to(device)
+og_meas = deepcopy(measurement.clone())
+from find_adversarial import PGD, PAdam, untargeted_attack
 from functools import partial
 from operators import proj_l2_ball
+
+
 # define loss function
 # x - target image, y - measurements, net - DL model, adv_noise - adversarial noise
-loss_adv = lambda adv_noise,x,y,net: (net(y + adv_noise) - x).pow(2).pow(.5).sum()
-loss_adv_partial = partial(loss_adv, x = v_tar, y = measurement, net = unet)
+#loss_adv = lambda adv_noise,x,y,net: (net(y + adv_noise) - x).norm(p=2,dim=1).max() # l-infinity norm for vector with complex entries
+loss_adv = lambda adv_noise,x,y,net: (net(y + adv_noise) - x).pow(2).pow(.5).sum()# / x.shape[-1]
+loss_adv_partial = partial(loss_adv, x = v_tar_complex, y = measurement, net = unet)
 
 # init input optimizer (PGD or alternative methods like PAdam)
 adv_init_fac = 3
-noise_rel = 0.05
+noise_rel = 0.01
 adv_noise_mag = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:])) 
+
+# make init adversarial noise vector
 adv_noise_init = adv_noise_mag * torch.randn_like(measurement).to(device)
-adv_noise_init.requires_grad = True
+#adv_noise_init.requires_grad = True
+
+# make init adversarial example vector
+adv_example_init = measurement + adv_noise_init
+adv_example_init.requires_grad = True
 
 # ------------- Projection setup -----------------------------
-# radius is the upper bound of the lp-norm of the projeciton operator
-radius = torch.tensor(1e-1).to(device)
-# centre is here the centre of the measurements - in general the centre of the projection ball 
+# radius is the upper bound of the lp-norm of the projection operator
+radius = (8e-2 * measurement.norm(p=2)).to(device)
+# ------ centre is here the centre of the measurements - in general the centre of the projection ball ------------- 
 # centre set to zero freq since measurements are zero-shifted
-centre = torch.zeros_like(measurement).to(device)
+#centre = torch.zeros_like(measurement).to(device)
+# centre set to zero freq since measurements are zero-shifted
+centre = measurement.clone().detach()
 projection_l2 = partial(proj_l2_ball, radius = radius, centre = centre)
 
 # perform PGD
@@ -96,29 +112,64 @@ adversarial_noise = PGD(
     silent      = False,
 )
 """
+"""
 # perform PAdam - uses the ADAM optimizer instead of GD and excludes the backtracking line search
 adversarial_noise = PAdam(
     loss        = loss_adv_partial,
     t_in        = adv_noise_init,
     projs       = [projection_l2],
-    niter        = 10,
-    stepsize    = 1e-4,
+    niter       = 50,
+    stepsize    = 1e-3,
     silent      = False,
 )
-# establish perturbed measurments and rec. images
-perturbed_measurements = measurement + adversarial_noise
-perturbed_targets = unet.forward(perturbed_measurements)
-perturbed_images  = (perturbed_targets[:,0]**2 + perturbed_targets[:,1]**2)**.5
-fig, axs = plt.subplots( len(perturbed_images), 3, figsize=(10, 10) )
-for i, img in enumerate(perturbed_images):
-    if len(axs.shape) > 1:
-        ax = axs[i]
-    else: ax = axs
-    ax[0].imshow(v_tar.detach().cpu(), cmap = "Greys_r")#; ax[0].set_title("Original")
-    ax[1].imshow(img.detach().cpu(),   cmap = "Greys_r")#; ax[1].set_title("Perturbed")
-    ax[2].imshow(torch.abs( v_tar.detach().cpu() - img.detach().cpu() ), cmap = "Greys_r")#; ax[2].set_title("Residuals")
+"""
+# loss functions
+mseloss = torch.nn.MSELoss(reduction="sum")
+def _complexloss(reference, prediction):
+    loss = mseloss(reference, prediction)# / reference.norm(p=2)
+    return loss
 
-[ax.set_axis_off() for ax in axs.flatten()]
-# remove whitespace and set tight layout
-fig.tight_layout()
-fig.savefig(os.getcwd() + "/plots/adversarial_attacks/adversarial_example.png", bbox_inches = "tight")
+adv_param = {
+    "codomain_dist" : _complexloss,
+    "domain_dist"   : None,
+    "mixed_dist"    : None,
+    "weights"       : (1.0, 1.0, 1.0),
+    "optimizer"     : PAdam, #adv_optim,
+    "projs"         : [projection_l2], #None,
+    "niter"         : 1000,
+    "stepsize"      : 1e-4,
+}
+
+# set unet in evaluation mode
+unet.eval()
+for p in unet.parameters():
+    p.requires_grad = False
+
+# compute adversarial example for batch
+measurement = untargeted_attack(
+    func      = lambda y: unet.forward(y), #rec,
+    t_in_adv  = adv_example_init,  # yadv[idx_batch : idx_batch + batch_size, ...].clone().requires_grad_(True),
+    #t_in_ref  = measurement.clone(),    # y0_batch,
+    t_in_ref  = deepcopy(measurement.clone()),    # y0_batch,
+    t_out_ref = v_tar_complex,  # x0_batch,
+    **adv_param
+).detach()
+
+# establish perturbed measurments and rec. images
+adversarial_noise = measurement - og_meas
+adj_adversarial_noise = OpA.adj(adversarial_noise).norm(p=2,dim=(0,1))
+rec = unet.forward(og_meas)
+perturbed_rec = unet.forward(measurement)
+# from complex to real
+img_rec      = rec.norm(p=2, dim=1)[0]
+img_pert_rec = perturbed_rec.norm(p=2, dim=1)[0]
+
+# ------------------ Plot adversarial example ------------------
+plotdir = os.path.join(config.PLOT_PATH, "adversarial_plots", "supervised", "eta%.1f"%eta)
+if not os.path.exists(plotdir):
+    os.makedirs(plotdir)
+save_image(v_tar.detach().cpu(),                                        os.path.join(plotdir, "original_image_small_text.pdf") )
+save_image(v_tar.detach().cpu() + adj_adversarial_noise.detach().cpu(), os.path.join(plotdir, "adv_pert_image_small_text.pdf") )
+save_image(img_rec.detach().cpu(),                                      os.path.join(plotdir, "rec_small_text.pdf") )
+save_image(img_pert_rec.detach().cpu(),                                 os.path.join(plotdir, "adv_pert_rec_small_text.pdf") )
+save_image(10*(v_tar - img_rec).abs().detach().cpu(),                   os.path.join(plotdir, "adv_pert_residual_small_text.pdf") )

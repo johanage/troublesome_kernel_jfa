@@ -88,18 +88,18 @@ def loss_func(pred, tar):
 
 # Details to be added
 # set directories
-savedir     = os.path.join(config.DATA_PATH, "train")
-plotdir     = os.path.join(config.PLOT_PATH, "detail_transfer")
+savedir = os.path.join(config.DATA_PATH, "train")
+plotdir = os.path.join(config.PLOT_PATH, "supervised", "detail_transfer")
 
 # ------ Load small detail to check if in/close to nullspace of A --------
 nullspace_data_det = torch.load(os.path.join(plotdir, "detail.pt") )
 
 # ------ Load the image with only the large detail: x + x_large_det --------------
 large_det = torch.load(os.path.join(plotdir, "large_detail.pt"))
-
 train_phases = 0
 #num_epochs = [500,100]
 num_epochs = [300,0]
+lr_init = 1e-4
 lr_gamma = 0.98
 lr_schedule_stepsize = 10
 jitter_params = {"eta" : 1e-1,  "scale_lo" : 0.0, "scale_hi" : 1.0}
@@ -122,9 +122,9 @@ train_params = {
     "save_epochs": 100,
     "optimizer": torch.optim.Adam,
     "optimizer_params": [
-        {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
+        {"lr": lr_init, "eps": 2e-4, "weight_decay": 1e-4},
         # start where phase 1 left off
-        {"lr": 1e-4**(num_epochs[0]/lr_schedule_stepsize), "eps": 2e-4, "weight_decay": 1e-4},
+        {"lr": lr_init**(num_epochs[0]/lr_schedule_stepsize), "eps": 2e-4, "weight_decay": 1e-4},
     ],
     "scheduler": torch.optim.lr_scheduler.StepLR,
     "scheduler_params": {"step_size": lr_schedule_stepsize, "gamma": lr_gamma},
@@ -177,7 +177,8 @@ with open(
 # Regular jittering : start from previously trained network
 # Modified jittering : start from pre-trained high noise jittering network
 #"""
-param_dir = "detail_transfer/supervised/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_2/"
+#param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_2/"
+param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1_dataconsistency/"
 file_param = "model_weights.pt"
 params_loaded = torch.load(os.path.join(config.RESULTS_PATH_KADINGIR,param_dir,file_param))
 unet.load_state_dict(params_loaded)
@@ -213,14 +214,12 @@ for i in range(train_phases):
     unet.train_on(train_data, val_data, **train_params_cur)
 
 ######## Reconstruction #######################################
-#param_dir = "detail_transfer/supervised/circle_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1/"
-#param_dir = "detail_transfer/supervised/circle_sr0.25/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_2/"
-#param_dir = "detail_transfer/supervised/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_2/"
-param_dir = "detail_transfer/supervised/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1_dataconsistency/"
-#file_param = "model_weights_epoch400.pt"
-file_param = "model_weights.pt"
+param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1_dataconsistency/"
+file_param = "model_weights_epoch300.pt"
+#file_param = "model_weights.pt"
 params_loaded = torch.load(os.path.join(config.RESULTS_PATH_KADINGIR, param_dir,file_param))
 unet.load_state_dict(params_loaded)
+# set network in evaluation mode
 unet.eval()
 for p in unet.parameters():
     p.requires_grad = False
@@ -240,12 +239,16 @@ large_det = torch.load(os.path.join(plotdir, "large_detail.pt"))
 
 # ------- Compute the detailed image -----------------
 data_detailed_image = to_complex(data[None,None]) + nullspace_data_det + to_complex(large_det[None,None])
+train_params["train_transform"].transforms.pop()
+measurement_detailed_image_trans, data_detailed_image_trans = train_params["train_transform"](torch.load(train_data.files[0])[None,None] )
+im_det_trans = data_detailed_image_trans.norm(p=2,dim=0)
 im_det = data_detailed_image.norm(p=2,dim=(0,1))
 # ---- Double check correct composition om image -------------------------------------------------------
 datalist = [data, im_det, data_large_det, 
     (data_detailed_image - to_complex(data[None,None])).norm(p=2,dim=(0,1)), 
     data_large_det - data, 
     (data_detailed_image - to_complex(data_large_det[None,None])).norm(p=2,dim=(0,1))]
+
 fig, axs = plt.subplots(1,len(datalist), figsize=(20,4))
 cmap = "Greys_r"
 plots_dc = [axs[i].imshow(datalist[i], cmap=cmap) for i in range(len(datalist))]
@@ -261,16 +264,33 @@ measurement_detailed_image = OpA(data_detailed_image)
 measurement_large_det      = OpA(to_complex(data_large_det[None,None]))
 measurement_sample         = OpA(to_complex(data[None,None]))
 # --- Reconstruct images  -----------------------------------------------
+rec_det_im_trans = unet.forward(measurement_detailed_image_trans[None].to(device))
 rec_det_im    = unet.forward(measurement_detailed_image.to(device))
 rec_large_det = unet.forward(measurement_large_det.to(device))
 rec_im        = unet.forward(measurement_sample.to(device))
 # --- Plot reconstructions ----------------------------------------------
-reclist = [data_detailed_image, rec_det_im, rec_large_det, rec_im]
+reclist = [rec_det_im, rec_large_det, rec_im]
 fig, axs = plt.subplots(1,len(reclist), figsize=(20,4))
 cmap = "Greys_r"
 plots_rec = [axs[i].imshow(reclist[i].detach().cpu().norm(p=2, dim=(0,1)), cmap=cmap) for i in range(len(reclist))]
 for ax,plot in zip(axs,plots_rec):
+    ax.axis("off")
     divider = mal(ax)
     cax     = divider.append_axes("right", size="5%", pad = 0.05)
     fig.colorbar(plot, cax=cax)
 fig.tight_layout()
+fig.savefig(os.path.join(plotdir, "rec_images.png"), dpi=140)
+
+# ----- Save individual images for thesis plot -----------
+imgreclist = [x.norm(p=2, dim=(0,1)) for x in reclist]
+oglist = [data_detailed_image.norm(p=2,dim=(0,1)), data_large_det, data] 
+fn_reclist = ["rec_nullspace_large_det", "rec_large_det", "rec_original"]
+fn_oglist  = ["image_nullspace_large_det", "image_large_det", "original"]
+for xtensor, fn in zip(oglist + imgreclist, fn_oglist + fn_reclist):
+    #fig, ax = plt.subplots(1,1, figsize=(5,5))
+    #ax.imshow(xtensor.detach().cpu(), cmap="Greys_r")
+    #ax.axis("off")
+    #fig.tight_layout()
+    #fig.savefig(os.path.join(plotdir, fn + ".png"), dpi=140, bbox_inches="tight", pad_inches=0)
+    # save using torchvision.utils.save_image that uses PIL Image module
+    torchvision.utils.save_image(xtensor, os.path.join(plotdir, fn + ".png"))

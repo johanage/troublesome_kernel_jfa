@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-
+from torchvision.utils import make_grid, save_image
 from matplotlib import rc
 from piq import psnr, ssim
 
@@ -24,17 +24,14 @@ methods_include = [
     "DIP UNet no jit 2/3 iterations",
     "DIP UNet no jit 1/3 iterations",
     "DIP UNet jit",
-    #"Supervised UNet no jit",
-    #"Supervised UNet jit",
-    #"Supervised UNet jit low noise",
+    "Supervised UNet no jit",
+    "Supervised UNet jit low noise",
+    "Supervised UNet jit",
+    "Supervised UNet jit very high noise",
     #"Supervised UNet jit mod",
-    #"Supervised UNet jit very high noise",
     #'L1',
-    #"UNet it no jit",
-    #"UNet it jit mod",
-    #"UNet it jit",
 ]
-methods_plot = methods_include #["L1", "UNet it jit mod",  "UNet it no jit"]
+methods_plot = methods_include 
 methods = methods.loc[methods_include]
 
 # select methods excluded from (re-)performing attacks
@@ -44,15 +41,12 @@ methods_no_calc = [
     "DIP UNet no jit 2/3 iterations",
     "DIP UNet no jit 1/3 iterations",
     "DIP UNet jit",
-    "Supervised UNet no jit",
-    "Supervised UNet jit",
+    #"Supervised UNet no jit",
     "Supervised UNet jit low noise",
-    "Supervised UNet jit mod",
+    "Supervised UNet jit",
     "Supervised UNet jit very high noise",
+    "Supervised UNet jit mod",
     #'L1',
-    #"UNet it jit",
-    #"UNet it no jit",
-    #"UNet it jit mod",
 ]
 # ------ general setup ----------
 device = cfg_rob.device
@@ -60,15 +54,16 @@ save_path = os.path.join(config.RESULTS_PATH, "attacks")
 save_results = os.path.join(save_path, "dip_supervised_table_adv.pkl")
 # plot config
 do_plot = True
-save_plot = True
-save_table = True
+#NOTE: set turned off when producing examples
+save_plot = False#True
+save_table = False#True
 
 # ----- attack setup -----
 # select samples
 # selecting sample numbers 50, ..., 59
 samples = tuple(range(50, 60))
 
-it_init = 6
+it_init = 1#6
 keep_init = 3
 
 # select range relative noise
@@ -83,7 +78,6 @@ val_data = IPDataset("val", config.DATA_PATH)
 X_0 = torch.stack([val_data[s][0] for s in samples])
 X_0 = to_complex(X_0.to(device))
 Y_0 = cfg_rob.OpA(X_0)
-
 
 # create result table
 results = pd.DataFrame(
@@ -153,6 +147,16 @@ for (idx, method) in methods.iterrows():
                 keep_init   = keep_init,
                 err_measure = err_measure,
             )
+            # save images
+            for i in range(X_adv_cur.shape[1]):
+                directory = os.path.join(config.PLOT_PATH, "adversarial_plots", "robustness_script", method.name.replace(" ", "_") )
+                if not os.path.exists(directory):
+                    os.makedirs(directory)
+                for j in range(X_adv_cur.shape[0]):
+                    dir_fn = os.path.join(directory, "sample_%i_example%i_eta%i.png"%(s, i, int(2*j) ) )
+                    save_image(X_adv_cur[j, i].norm(p=2, dim=0), dir_fn)
+            # NOTE: break enabled when plotting example0
+            break 
             # store max current adversarial error
             (
                 results.loc[idx].X_adv_err[:, s],
@@ -252,7 +256,7 @@ if do_plot:
                 )
 
     ax.set_yticks(np.arange(0, 1, step=0.05))
-    ax.set_ylim((0.05, 0.18))
+    ax.set_ylim((0.05, 0.13))
     for a in (ax, ax_std):
         a.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
         a.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])

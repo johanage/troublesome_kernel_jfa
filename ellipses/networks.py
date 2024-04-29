@@ -79,7 +79,6 @@ class InvNet(torch.nn.Module, metaclass=ABCMeta):
         inp = inp.to(self.device)
         tar = tar.to(self.device)
         pred = self.forward(inp)
-
         loss = loss_func(pred, tar) / acc_steps
         loss.backward()
         if (batch_idx // batch_size + 1) % acc_steps == 0:

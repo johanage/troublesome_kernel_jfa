@@ -10,6 +10,7 @@ from networks import UNet
 from operators import Fourier as Fourier
 from operators import Fourier_matrix as Fourier_m
 from operators import (
+    to_complex,
     LearnableInverterFourier,
     RadialMaskFunc,
     MaskFromFile,
@@ -29,23 +30,29 @@ if gpu_avail:
     torch.cuda.set_device(device)
 
 # ----- measurement configuration -----
-""" Radial sampling golden 180 angle
+#""" Radial sampling golden 180 angle
 mask_func = RadialMaskFunc(config.n, 40)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
-"""
+#"""
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
 sampling_rate = sr_list[-1]
-print("sampling rate used is :", sampling_rate)
-sp_type = "circle" # "diamond", "radial"
+print("Sampling rate used is (only correct for multilevel sampling patterns): ", sampling_rate_computed)
+sp_type = "radial"#"circle"
+# NOTE: emprically observed that the a=2 circular pattern gives ~1% less rel. l2-error
 mask_fromfile = MaskFromFile(
+    # ------------ a=1 sampling patterns ----------------
     path = os.path.join(config.SP_PATH, sp_type), # circular pattern
-    #path = config.SP_PATH,
     filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
+    # ------------ a=2 sampling patterns ----------------
+    #path = config.SP_PATH,
     #filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
 )
-mask = mask_fromfile.mask[None]
+#mask = mask_fromfile.mask[None]
+# compute sampling rate from mask
+sampling_rate_comp = mask.sum().item() / list(accumulate(tuple(mask.shape), operator.mul))[-1]
+print("Computed sampling rate is: ", sampling_rate_computed)
 # Fourier matrix
 OpA_m = Fourier_m(mask)
 # Fourier operator
@@ -76,24 +83,26 @@ def loss_func(pred, tar):
     )
 
 train_phases = 1
-num_epochs = [300, 0] # fastMRI
+num_epochs = [200, 0] # fastMRI
 #num_epochs = [10, 0]   # ellipses
 lr_gamma = 0.98
 lr_scheduler_step = 10
+a_sampling_pattern = 1 # a parameter of the multilevel sampling pattern for more informed dir names 
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
     "batch_size" : [10, 10], 
     "loss_func"  : loss_func,
     "save_path"  : [
         os.path.join(
-            config.SCRATCH_PATH,  
+            #config.SCRATCH_PATH,  
+            config.RESULTS_PATH_KADINGIR,  
             #"supervised/ellipses/%s_sr%.2f/Fourier_UNet_no_jitter_ellipses_256"%(sp_type, sampling_rate),
-            "supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate),
+            "supervised/%s_sr%.2f_a%i/Fourier_UNet_no_jitter_brain_fastmri_256"%(sp_type, sampling_rate, a_sampling_pattern),
             "train_phase_{}".format((i + 1) % (train_phases + 1)),
         )
         for i in range(train_phases + 1)
     ],
-    "save_epochs"      : 4,
+    "save_epochs"      : 100,
     "optimizer"        : torch.optim.Adam,
     "optimizer_params" : [
         {"lr": 1e-4, "eps": 2e-4, "weight_decay": 1e-4},
@@ -149,19 +158,35 @@ with open(
 
 # ------ construct network and train -----
 unet = unet(**unet_params)
-
-# start from previously trained network
-#"""
-param_dir      = "supervised/circ_sr0.25/Fourier_UNet_jitter_brain_fastmri_256eta_0.100_train_phase_2"
-file_param     = "model_weights.pt"
-params_loaded  = torch.load(os.path.join(config.SCRATCH_PATH, param_dir, file_param) )
-unet.load_state_dict(params_loaded)
-#breakpoint()
-#"""
-
+# set device for unet
 if unet.device == torch.device("cpu"):
     unet = unet.to(device)
 assert gpu_avail and unet.device == device, "for some reason unet is on %s even though gpu avail %s"%(unet.device, gpu_avail)
+
+
+# start from previously trained network
+#"""
+#param_dir = "supervised/circle_sr0.25_a2/Fourier_UNet_jitter_brain_fastmri_256/eta_0.100_train_phase_1" # low noise jitter SL UNet
+#param_dir = "supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256/train_phase_%i"%(sp_type, sampling_rate, 1)
+#param_dir = "supervised/%s_sr%.2f/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_%.3f_train_phase_%i"%(sp_type, sampling_rate, 0.1, 1)
+#param_dir = "supervised/%s_sr%.2f/Fourier_UNet_no_jitter_brain_fastmri_256_single_sample/train_phase_1"%(sp_type, sampling_rate)
+param_dir = "supervised/%s_sr%.2f/Fourier_UNet_jitter_brain_fastmri_256/eta_%.3f_train_phase_%i"%(sp_type, sampling_rate, 0.1, 1)
+file_param    = "model_weights.pt"
+#params_loaded = torch.load(os.path.join(config.SCRATCH_PATH, param_dir, file_param) )
+params_loaded = torch.load(os.path.join(config.RESULTS_PATH_KADINGIR, param_dir, file_param) )
+unet.load_state_dict(params_loaded)
+#"""
+
+# reconstruct val sample with added text "CANCER"
+"""unet.eval()
+with torch.no_grad():
+    sample = to_complex(torch.load(os.path.join(datapath, "train", "sample_00000.pt"))[None, None].to(device))
+    rec = unet.forward(OpA(sample)).cpu()
+    #sample_text = to_complex(torch.load(os.path.join(datapath, "val", "sample_00042_text.pt"))[None, None].to(device))
+    #rec_cancer = unet.forward(OpA(sample_text)).cpu()
+#torchvision.utils.save_image(rec_cancer.norm(p=2,dim=(0,1)), os.path.join(config.PLOT_PATH, "supervised", "fig_example_S00042_adv_unet_no_jit_text.pdf" ) )
+torchvision.utils.save_image(rec.norm(p=2,dim=(0,1)), os.path.join(config.PLOT_PATH, "supervised", "fig_example_S00042_adv_unet_no_jit_text.pdf" ) )
+"""
 # get train and validation data
 # data has shape (number of samples, (measurements, images) )
 # Note that the second dimension consist of a 2-tuple
@@ -169,6 +194,10 @@ assert gpu_avail and unet.device == device, "for some reason unet is on %s even 
 # measurement y has shape (2, m) since y in C^m
 train_data = train_data("train", **train_data_params)
 val_data = val_data("val", **val_data_params)
+
+# --- Set train_data to single sample ----------
+#sample_idx = 0
+#train_data.files = [x for x in train_data.files if "%.5i"%sample_idx in x]
 
 # run training 
 for i in range(train_phases):
