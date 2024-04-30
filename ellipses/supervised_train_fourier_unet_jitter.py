@@ -11,6 +11,8 @@ import matplotlib as mpl
 import torch
 import torchvision
 from torchvision.transforms import v2
+from itertools import accumulate
+import operator
 # from local scripts
 from data_management import IPDataset, SimulateMeasurements, ToComplex, Jitter
 from networks import UNet
@@ -43,22 +45,21 @@ mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
 """
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
-sampling_rate = sr_list[-1]
+sampling_rate = sr_list[2]
 print("sampling rate used is :", sampling_rate)
-sp_type = "circle"
-
+sp_type = "diamond"
 mask_fromfile = MaskFromFile(
     # ---------- a=1 sampling patterns ---------------------------------------------------
-    #path = os.path.join(config.SP_PATH, sp_type), # circular pattern
-    #filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
+    path = os.path.join(config.SP_PATH, sp_type), # circular pattern
+    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
     # ---------- a=2 sampling patterns ---------------------------------------------------
-    path = config.SP_PATH,
-    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
+    #path = config.SP_PATH,
+    #filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
 )
 mask = mask_fromfile.mask[None]
 # compute sampling rate from mask
 sampling_rate_comp = mask.sum().item() / list(accumulate(tuple(mask.shape), operator.mul))[-1]
-print("Computed sampling rate: ", sampling_rate_computed)
+print("Computed sampling rate: ", sampling_rate_comp)
 
 # Fourier matrix
 OpA_m = Fourier_m(mask)
@@ -89,12 +90,12 @@ def loss_func(pred, tar):
         mseloss(pred, tar) / pred.shape[0]
     )
 
-train_phases = 0
-num_epochs = [200,0]
+train_phases = 1
+num_epochs = [500,0]
 lr_init = 1e-4
 lr_gamma = 0.98
 lr_schedule_stepsize = 60
-jitter_params = {"eta" : 0.1,  "scale_lo" : 0.0, "scale_hi" : 1.0}
+jitter_params = {"eta" : 10,  "scale_lo" : 0.0, "scale_hi" : 1.0}
 train_params = {
     "num_epochs": num_epochs, # fastmri, single-coil
     "batch_size": [10, 10], # ellipses
@@ -174,7 +175,7 @@ unet = unet(**unet_params)
 
 # Regular jittering : start from previously trained network
 # Modified jittering : start from pre-trained high noise jittering network
-#"""
+"""
 param_dir = "supervised/circle_sr0.25_a2/Fourier_UNet_jitter_brain_fastmri_256/eta_100.000_train_phase_1"
 #param_dir = "supervised/circle_sr0.25_a2/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_50.000_train_phase_1"
 file_param = "model_weights.pt"

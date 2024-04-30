@@ -135,14 +135,17 @@ dir_val   = os.path.join(config.DATA_PATH, "val")
 #dir_val   = os.path.join(config.TOY_DATA_PATH, "val")
 
 # Load one sample to train network on
-sample_idx = 21
-#sample = torch.load(os.path.join(dir_train,"sample_%.5i.pt"%sample_idx))
-sample = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) )
+sample_idx = 0#21
+sample = torch.load(os.path.join(dir_train,"sample_%.5i.pt"%sample_idx))
+#sample = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) )
 #sample = torch.load(os.path.join(dir_train,"sample_%i.pt"%sample_idx))
 sample = to_complex(sample[None,None])
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement.to(device)
+meas_noise_std = 0.08
+measurement += meas_noise_std * torch.randn_like(measurement)
+
 
 save_ztilde = False
 if save_ztilde:
@@ -263,7 +266,12 @@ if reconstruct:
             "rel_eval_diff": app_log["rel_eval_diff"][0],
             })
         )
-        
+        if epoch > 10000 and (img_rec - img).norm(p=2)/img.norm(p=2) > 10**-.8:
+            print("spike in rel. l2-err!")
+            torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_epoch{epoch}.pt".format(
+                suffix = fn_suffix,
+                epoch  = epoch,
+            )))
         # save reconstruction and network weigths every save_epoch
         if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
             print("Saving parameters of models and plotting evolution")
@@ -279,12 +287,7 @@ if reconstruct:
                 )))
                 # save the unet parameters for each num_epochs
                 torch.save(unet.state_dict(), os.path.join(path,"DIP_UNet_nojit_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) ) )
-                if epoch > 10000 and (img_rec - img).norm(p=2)/img.norm(p=2) > 10**-.8:
-                    print("spike in rel. l2-err!")
-                    torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_epoch{epoch}.pt".format(
-                        suffix = fn_suffix,
-                        epoch  = epoch,
-                    )))
+                
             else:
                 # save last rec img
                 torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_last.pt".format(
