@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-
+from torchvision.utils import save_image
 from matplotlib import rc
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 from piq import psnr, ssim
@@ -22,7 +22,8 @@ torch.manual_seed(1)
 
 save_plot = True
 # select samples
-sample = "00042"
+#sample = "00042" # fastMRI val sample with CANCER-text
+sample = "21" # ellipses val sample with text
 save_path = os.path.join(config.RESULTS_PATH, "attacks", "example_S%s"%sample)
 
 # dynamic range for plotting & similarity indices
@@ -33,16 +34,16 @@ err_measure = err_measure_l2
 
 # select reconstruction methods
 methods_include = [
-    #"DeepDecoder no jit",
-    #"DIP UNet no jit",
+    "DeepDecoder no jit",
+    "DIP UNet no jit",
     #"DIP UNet no jit 2/3 iterations",
     #"DIP UNet no jit 1/3 iterations",
     #"DIP UNet jit",
-    "Supervised UNet no jit",
-    "Supervised UNet jit",
-    "Supervised UNet jit low noise",
+    #"Supervised UNet no jit",
+    #"Supervised UNet jit",
+    #"Supervised UNet jit low noise",
     #"Supervised UNet jit mod",
-    "Supervised UNet jit very high noise",
+    #"Supervised UNet jit very high noise",
     #'L1',
 ]
 
@@ -66,7 +67,8 @@ methods_no_calc = [
 
 
 # select sample
-single_im = torch.load(os.path.join(config.DATA_PATH, f'val/sample_{sample}_text.pt'))
+#single_im = torch.load(os.path.join(config.DATA_PATH, "val",  f'sample_{sample}_text.pt')) # fastMRI
+single_im = torch.load(os.path.join(config.TOY_DATA_PATH, "val",  f'sample_{sample}_text.pt')) # ellipses dataset
 single_im1 = single_im.unsqueeze(0);
 
 X_0 = to_complex(single_im1.to(device)).unsqueeze(0)
@@ -130,6 +132,12 @@ for (idx, method) in methods.iterrows():
         if "Supervised" in method.name:
             X_rec = method.reconstr(Y_0)#, 0)
         
+        # save image using torchvision + PIL
+        save_image(X_rec.norm(p=2, dim=(0,1)), os.path.join(save_path,
+            "image_example_S{}_adv_err_".format(sample)
+            + method["info"]["name_save"]
+            + "_text.png"
+        ))
         # compute the l2-reconstruction error
         rec_err = err_measure(X_rec, X_0);
         print(f'{idx}: rel l2 error: {rec_err}');
@@ -137,6 +145,7 @@ for (idx, method) in methods.iterrows():
         fig, ax = plt.subplots(clear=True, figsize=(2.5, 2.5), dpi=200)
         extent = (0, 255, 0, 255)
         im = _implot(ax, X_rec, **{"extent" : extent, "origin" : "upper"})
+        """
         ax.text(
             242,
             6,
@@ -163,6 +172,7 @@ for (idx, method) in methods.iterrows():
         #axins.invert_yaxis()
         #zoom_rect = mark_inset(ax, axins, loc1=1, loc2=3, edgecolor="#a1c9f4")
         ax.indicate_inset_zoom(axins, edgecolor="#a1c9f4")
+        """
         if save_plot:
             fig.savefig(
                 os.path.join(

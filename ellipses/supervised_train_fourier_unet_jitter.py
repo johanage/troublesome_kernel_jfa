@@ -38,25 +38,25 @@ if gpu_avail:
     torch.cuda.set_device(device)
 
 # ----- measurement configuration -----
-""" Radial sampling golden 180 angle
-mask_func = RadialMaskFunc(config.n, 40)
+#""" Radial sampling golden 180 angle
+mask_func = RadialMaskFunc(config.n, 17)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
-"""
+#"""
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
 sampling_rate = sr_list[2]
 print("sampling rate used is :", sampling_rate)
-sp_type = "diamond"
+sp_type = "radial"
 mask_fromfile = MaskFromFile(
     # ---------- a=1 sampling patterns ---------------------------------------------------
-    path = os.path.join(config.SP_PATH, sp_type), # circular pattern
-    filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
+    #path = os.path.join(config.SP_PATH, sp_type), # circular pattern
+    #filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate) # sampling_rate *100 % sr, a = 1, r0 = 2, nlevles = 50 
     # ---------- a=2 sampling patterns ---------------------------------------------------
-    #path = config.SP_PATH,
-    #filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
+    path = config.SP_PATH,
+    filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png" # circular pattern, 25 % sr, a = 2, r0 = 2, nlevels = 50
 )
-mask = mask_fromfile.mask[None]
+#mask = mask_fromfile.mask[None]
 # compute sampling rate from mask
 sampling_rate_comp = mask.sum().item() / list(accumulate(tuple(mask.shape), operator.mul))[-1]
 print("Computed sampling rate: ", sampling_rate_comp)

@@ -206,7 +206,7 @@ def _reconstructDIP(
         x0_dummy = None#torch.zero_like(net.forward(z_tilde))
         jit_params = {"eta" : jitter_level,  "scale_lo" : 0.0, "scale_hi" : 1.0}
         Jitter_trans = Jitter(**jit_params)
-        measurement, x0_dummy = Jitter_trans( (y0, x0_dummy) )
+        y0, x0_dummy = Jitter_trans( (y0, x0_dummy) )
 
     for epoch in range(epochs):
         # set gradients to zero

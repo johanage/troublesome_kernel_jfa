@@ -2,7 +2,7 @@
 import os
 import matplotlib as mpl
 import torch
-import torchvision
+from torchvision.utils import save_image
 from piq import psnr, ssim
 # local imports
 from data_management import IPDataset, SimulateMeasurements, ToComplex
@@ -93,8 +93,9 @@ train_params = {
     "batch_size": 1,
     "loss_func": loss_func,
     #"save_path": os.path.join(config.RESULTS_PATH,"DeepDecoder"),
-    "save_path": os.path.join(config.SCRATCH_PATH,"DeepDecoder"),
-    "save_epochs": num_epochs//10,
+    #"save_path": os.path.join(config.SCRATCH_PATH,"DeepDecoder"),
+    "save_path": os.path.join(config.RESULTS_PATH_KADINGIR,"DeepDecoder"),
+    "save_epochs": 1000,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
     "scheduler_params": {
         "step_size": num_epochs//100,
@@ -126,7 +127,7 @@ fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_k{dim_channels}_nc{num_
     additional       = "_a2",                                # a=2 multilevel sampling patterns
 )
 # -------- Load adversarial example ----------------------------------
-noise_rel = 6e-2
+noise_rel = 8e-2
 file_param = "DeepDecoder_nojit_%s_last.pt"%(fn_suffix)
 perturbed_measurement = torch.load(os.getcwd() + "/adv_attack_dd/adv_example_noiserel%.2f_%s"%(noise_rel, file_param))
 # -------- Load adversarial noise ----------------------------------
@@ -171,6 +172,8 @@ from dip_utils import get_img_rec#, center_scale_01
 isave = 0
 # magnitude of added gaussian noise during training
 sigma_p = 1/50
+path = train_params["save_path"]
+save_path_dd_adv_rec = os.path.join(config.PLOT_PATH, "adversarial_plots", "DeepDecoder", "noiserel%i"%(int(noise_rel*100)) )
 for epoch in range(train_params["num_epochs"]): 
     deep_decoder.train()  # make sure we are in train mode
     optimizer.zero_grad()
@@ -221,9 +224,9 @@ for epoch in range(train_params["num_epochs"]):
     if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
         print("Saving parameters of models and plotting evolution")
         ###### Save parameters of DeepDecoder model
-        path = train_params["save_path"]
         if epoch < train_params["num_epochs"] - 1:
             torch.save(deep_decoder.state_dict(), path + "/DeepDecoder_adv_{suffix}_epoch{epoch}.pt".format(suffix = fn_suffix, epoch=epoch) )
+            save_image(img_rec, path + "/DeepDecoder_adv_rec_{suffix}_epoch{epoch}.png".format(suffix = fn_suffix, epoch=epoch) )
             ###### Plot evolution of training process #######
             cmap = "Greys_r"
             axs[0,isave].imshow(img_rec, cmap=cmap)
@@ -233,10 +236,10 @@ for epoch in range(train_params["num_epochs"]):
             isave += 1       
         else:
             torch.save(deep_decoder.state_dict(), path + "/DeepDecoder_adv_{suffix}_last.pt".format(suffix = fn_suffix) )
+            save_image(img_rec, path + "/DeepDecoder_adv_rec_{suffix}_last.png".format(suffix = fn_suffix) )
         
 # remove whitespace and plot tighter
 fig.tight_layout()
-save_path_dd_adv_rec = os.path.join(config.PLOT_PATH, "adversarial_plots", "DeepDecoder", "noiserel%i"%(int(noise_rel*100)) )
 if not os.path.exists(save_path_dd_adv_rec):
     os.makedirs(save_path_dd_adv_rec)
 fig.savefig(os.path.join(save_path_dd_adv_rec, "DeepDecoder_adv_evolution_%s_sr%.2f_%s.png"%(sp_type, sampling_rate, fn_suffix)), bbox_inches="tight")

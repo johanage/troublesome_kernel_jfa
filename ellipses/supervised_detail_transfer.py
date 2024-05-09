@@ -73,8 +73,8 @@ unet_params = {
     "out_channels"  : 2,
     "operator"      : OpA_m,
     "inverter"      : inverter,
-    #"upsampling"    : "nearest",
-    "upsampling"    : "trans_conv",
+    "upsampling"    : "nearest",
+    #"upsampling"    : "trans_conv",
 }
 # ------ construct network and train -----
 unet = UNet(**unet_params)
@@ -176,7 +176,7 @@ with open(
 
 # Regular jittering : start from previously trained network
 # Modified jittering : start from pre-trained high noise jittering network
-#"""
+"""
 #param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_2/"
 param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1_dataconsistency/"
 file_param = "model_weights.pt"
@@ -214,9 +214,10 @@ for i in range(train_phases):
     unet.train_on(train_data, val_data, **train_params_cur)
 
 ######## Reconstruction #######################################
-param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1_dataconsistency/"
-file_param = "model_weights_epoch300.pt"
-#file_param = "model_weights.pt"
+#param_dir = "supervised/detail_transfer/circle_sr0.25/upsampling_trans_conv/Fourier_UNet_jitter_mod_brain_fastmri_256/eta_0.100_train_phase_1_dataconsistency/"
+param_dir ="supervised/circle_sr0.25_a2/Fourier_UNet_no_jitter_brain_fastmri_256/train_phase_1/"
+#file_param = "model_weights_epoch300.pt"
+file_param = "model_weights.pt"
 params_loaded = torch.load(os.path.join(config.RESULTS_PATH_KADINGIR, param_dir,file_param))
 unet.load_state_dict(params_loaded)
 # set network in evaluation mode

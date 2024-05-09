@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torchvision.utils import make_grid, save_image
+from torchvision.io import read_image, ImageReadMode
 from matplotlib import rc
 from piq import psnr, ssim
 
@@ -24,10 +25,10 @@ methods_include = [
     "DIP UNet no jit 2/3 iterations",
     "DIP UNet no jit 1/3 iterations",
     "DIP UNet jit",
-    "Supervised UNet no jit",
-    "Supervised UNet jit low noise",
-    "Supervised UNet jit",
-    "Supervised UNet jit very high noise",
+    #"Supervised UNet no jit",
+    #"Supervised UNet jit low noise",
+    #"Supervised UNet jit",
+    #"Supervised UNet jit very high noise",
     #"Supervised UNet jit mod",
     #'L1',
 ]
@@ -37,11 +38,11 @@ methods = methods.loc[methods_include]
 # select methods excluded from (re-)performing attacks
 methods_no_calc = [
     "DeepDecoder no jit",
-    "DIP UNet no jit",
+    #"DIP UNet no jit",
     "DIP UNet no jit 2/3 iterations",
     "DIP UNet no jit 1/3 iterations",
     "DIP UNet jit",
-    #"Supervised UNet no jit",
+    "Supervised UNet no jit",
     "Supervised UNet jit low noise",
     "Supervised UNet jit",
     "Supervised UNet jit very high noise",
@@ -55,15 +56,15 @@ save_results = os.path.join(save_path, "dip_supervised_table_adv.pkl")
 # plot config
 do_plot = True
 #NOTE: set turned off when producing examples
-save_plot = False#True
-save_table = False#True
+save_plot = True
+save_table = True
 
 # ----- attack setup -----
 # select samples
 # selecting sample numbers 50, ..., 59
 samples = tuple(range(50, 60))
 
-it_init = 1#6
+it_init = 4
 keep_init = 3
 
 # select range relative noise
@@ -148,6 +149,7 @@ for (idx, method) in methods.iterrows():
                 err_measure = err_measure,
             )
             # save images
+            """
             for i in range(X_adv_cur.shape[1]):
                 directory = os.path.join(config.PLOT_PATH, "adversarial_plots", "robustness_script", method.name.replace(" ", "_") )
                 if not os.path.exists(directory):
@@ -155,22 +157,20 @@ for (idx, method) in methods.iterrows():
                 for j in range(X_adv_cur.shape[0]):
                     dir_fn = os.path.join(directory, "sample_%i_example%i_eta%i.png"%(s, i, int(2*j) ) )
                     save_image(X_adv_cur[j, i].norm(p=2, dim=0), dir_fn)
-            # NOTE: break enabled when plotting example0
-            break 
-            # store max current adversarial error
+            """ 
+            # ------- store max current adversarial error ----------------
             (
                 results.loc[idx].X_adv_err[:, s],
                 idx_max_adv_err,
             ) = X_adv_err_cur.max(dim=1)
-            # store current mean of reference error
+            
+            # ------- store current mean of reference error --------------
             results.loc[idx].X_ref_err[:, s] = X_ref_err_cur.mean(dim=1)
-
-
             for idx_noise in range(len(noise_rel)):
                 idx_max = 0;
                 a11 = X_adv_cur[idx_noise, idx_max, ...];
-                
                 idx_max = idx_max_adv_err[idx_noise]
+                # --------- Adversarial results PSNR and SSIM -------------------
                 results.loc[idx].X_adv_psnr[idx_noise, s] = psnr(
                     torch.clamp(
                         X_adv_cur[idx_noise, idx_max, ...].unsqueeze(0), 
@@ -181,6 +181,16 @@ for (idx, method) in methods.iterrows():
                     data_range=1.0,
                     reduction="none",
                 )
+                results.loc[idx].X_adv_ssim[idx_noise, s] = ssim(
+                    torch.clamp(
+                        X_adv_cur[idx_noise, idx_max, ...].unsqueeze(0), 
+                        min=0,
+                        max=1
+                    ),
+                    X_0_s[0, ...].unsqueeze(0).cpu(),
+                    data_range=1.0,
+                )
+                # --------- Reference results PSNR and SSIM -------------------
                 results.loc[idx].X_ref_psnr[idx_noise, s] = psnr(
                     torch.clamp(
                         X_ref_cur[idx_noise, idx_max, ...].unsqueeze(0), 
@@ -191,15 +201,7 @@ for (idx, method) in methods.iterrows():
                     data_range=1.0,
                     reduction="mean",
                 )
-                results.loc[idx].X_adv_ssim[idx_noise, s] = ssim(
-                    torch.clamp(
-                        X_adv_cur[idx_noise, idx_max, ...].unsqueeze(0), 
-                        min=0,
-                        max=1
-                    ),
-                    X_0_s[0, ...].unsqueeze(0).cpu(),
-                    data_range=1.0,
-                )
+
                 results.loc[idx].X_ref_ssim[idx_noise, s] = ssim(
                     torch.clamp(
                         X_ref_cur[idx_noise, idx_max, ...].unsqueeze(0), 
@@ -256,7 +258,8 @@ if do_plot:
                 )
 
     ax.set_yticks(np.arange(0, 1, step=0.05))
-    ax.set_ylim((0.05, 0.13))
+    ax.set_ylim((0.05, 0.13)) # DIP
+    #ax.set_ylim((0.05, 0.18))  # supervised
     for a in (ax, ax_std):
         a.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
         a.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])

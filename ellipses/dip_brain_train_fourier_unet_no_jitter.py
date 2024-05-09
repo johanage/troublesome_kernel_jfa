@@ -34,22 +34,22 @@ if gpu_avail:
     torch.cuda.set_device(device)
 
 # ----- measurement configuration -----
-#"""
-mask_func = RadialMaskFunc(config.n, 40)
+"""
+mask_func = RadialMaskFunc(config.n, 17)
 mask = mask_func((1,) + config.n + (1,))
 mask = mask.squeeze(-1)
 mask = mask.unsqueeze(1)
 #"""
 # ----- import from file ----------------------------------
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
-sampling_rate = sr_list[-3]
+sampling_rate = sr_list[2]
 #sampling_rate = sr_list[int(sys.argv[1])]
 #sampling_rate = mask.sum().item() / list(accumulate(tuple(mask.shape), operator.mul))[-1]
-sp_type = "circle" #"radial"
+sp_type = "diamond"
 print("sampling pattern : ", sp_type, "sampling rate used is :", sampling_rate)
 mask_fromfile = MaskFromFile(
     # -------- a=1 Samplig patterns --------------------
-    path = os.path.join(config.SP_PATH, "circle"), 
+    path = os.path.join(config.SP_PATH, "%s"%sp_type), 
     filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
     # -------- a=2 Samplig patterns --------------------
     #path = config.SP_PATH, 
@@ -57,6 +57,9 @@ mask_fromfile = MaskFromFile(
     #filename = "multilevel_sampling_pattern_diamond_sr2.500000e-01_a2_r0_2_levels50.png",
 )
 mask = mask_fromfile.mask[None]
+# compute the sampling rate from the mask 
+sampling_rate_comp = mask.sum().item() / list(accumulate(tuple(mask.shape), operator.mul))[-1]
+print("Computed sampling rate is: ", sampling_rate_comp)
 
 # Fourier matrix
 OpA_m = Fourier_m(mask)
@@ -95,8 +98,10 @@ train_params = {
     #"save_path": os.path.join(config.RESULTS_PATH,"DIP"),
     #"save_path": os.path.join(config.SCRATCH_PATH,"DIP"),
     #"save_path": os.path.join(config.SCRATCH_PATH,"DIP", "ellipses"),
-    "save_path": os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "sampling_rate_experiment"),
+    #"save_path": os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "sampling_rate_experiment"),
+    #"save_path": os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "adv_attacks", "orig_rec", "noiseless_meas", "%iiter"%num_epochs),
     #"save_path": os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2"),
+    "save_path": os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a1"),
     "save_epochs": num_epochs//10,
     #"optimizer": torch.optim.Adam,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
@@ -135,19 +140,21 @@ dir_val   = os.path.join(config.DATA_PATH, "val")
 #dir_val   = os.path.join(config.TOY_DATA_PATH, "val")
 
 # Load one sample to train network on
-sample_idx = 0#21
-sample = torch.load(os.path.join(dir_train,"sample_%.5i.pt"%sample_idx))
-#sample = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) )
-#sample = torch.load(os.path.join(dir_train,"sample_%i.pt"%sample_idx))
+sample_idx = 0 
+sample = torch.load(os.path.join(dir_train,"sample_%.5i.pt"%sample_idx)) # sample from train set
+#sample = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) ) # sample 21 or 42 with text details
+#sample = torch.load(os.path.join(dir_train,"sample_%i.pt"%sample_idx)) # sample from ellipses dataset
 sample = to_complex(sample[None,None])
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement.to(device)
-meas_noise_std = 0.08
-measurement += meas_noise_std * torch.randn_like(measurement)
+#meas_noise_std = 0.08 * measurement.norm(p=2) / np.sqrt(np.prod( measurement.shape[-2:] ) )
+#meas_noise = meas_noise_std * torch.randn_like(measurement)
+#measurement += meas_noise 
+#print(" l2-norm of Gaussaian noise : ", meas_noise.norm(p=2)/ OpA(sample).norm(p=2) ) 
 
 
-save_ztilde = False
+save_ztilde = True
 if save_ztilde:
     # init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
     noise_mag = .1
@@ -157,7 +164,7 @@ if save_ztilde:
     torch.save(z_tilde, os.path.join(train_params["save_path"], "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
 # load z_tilde
 else:
-    z_tilde = torch.load(os.path.join(train_params["save_path"], "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
+    z_tilde = torch.load(os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "sampling_rate_experiment", "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
 z_tilde = z_tilde.to(device)
 
 # optimizer setup
@@ -198,6 +205,7 @@ fn_suffix = "lr_{lr}_gamma_{gamma}_step_{gamma_step}_sp_{sampling_pattern}{addit
     sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
     additional       = "_a1",
     #additional       = "_a2",
+    #additional       = "_a2_adv%iiter"%num_epochs,
 )
 
 # prepare reference image
@@ -266,12 +274,12 @@ if reconstruct:
             "rel_eval_diff": app_log["rel_eval_diff"][0],
             })
         )
-        if epoch > 10000 and (img_rec - img).norm(p=2)/img.norm(p=2) > 10**-.8:
-            print("spike in rel. l2-err!")
-            torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_epoch{epoch}.pt".format(
-                suffix = fn_suffix,
-                epoch  = epoch,
-            )))
+        #if epoch > 10000 and (img_rec - img).norm(p=2)/img.norm(p=2) > 10**-.8:
+        #    print("spike in rel. l2-err!")
+        #    torch.save(pred_img.detach().cpu(), os.path.join(path, "DIP_nojit_rec_{suffix}_epoch{epoch}.pt".format(
+        #        suffix = fn_suffix,
+        #        epoch  = epoch,
+        #    )))
         # save reconstruction and network weigths every save_epoch
         if epoch % train_params["save_epochs"] == 0 or epoch == train_params["num_epochs"] - 1:
             print("Saving parameters of models and plotting evolution")

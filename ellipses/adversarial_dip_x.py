@@ -81,16 +81,31 @@ measurement = OpA(v_tar_complex).to(device)
 
 # temp dir with network weights and z_tilde
 #param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP")
-param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2")
+#param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2")
+#param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2")
+nepochs = 8000
+param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "adv_attacks", "orig_rec", "noiseless_meas", "%iiter"%nepochs)
+
 
 # init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
-z_tilde = torch.load(os.path.join(param_dir, "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
+z_tilde = torch.load(os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "sampling_rate_experiment", "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
+#z_tilde = torch.load(os.path.join(param_dir, "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
 z_tilde = z_tilde.to(device)
 
 # load model weights
 file_param = "DIP_UNet_nojit_lr_0.0001_gamma_0.99_step_100_sp_%s_sr%.2f_a2_last.pt"%(sp_type, sampling_rate)
 params_loaded = torch.load( os.path.join(param_dir, file_param) )
 unet.load_state_dict(params_loaded)
+# set unet in evaluation mode
+unet.eval()
+for p in unet.parameters():
+    p.requires_grad = False
+
+xhat0 = unet.forward(z_tilde)
+
+from torchvision.utils import save_image
+plotdir = os.path.join(config.PLOT_PATH, "adversarial_plots", "DIP", "test_adv_rec")
+save_image(xhat0.norm(p=2, dim=(0,1)).detach().cpu(), os.path.join(plotdir, "xhat0_DIP_adv_attack_%iiter.png"%nepochs) )
 
 # --------- Adv. attack loss functions -------------------------------------------------------------------------------------------------------
 # xhat - reconstructed image, x - target image, adv_noise - adversarial noise
@@ -108,7 +123,7 @@ if adversarial_measurement:
 
     # init input optimizer for adversarial examples/measurements (PGD or alternative methods like PAdam)
     adv_init_fac   = 3
-    noise_rel      = 6e-2
+    noise_rel      = 8e-2
     adv_noise_mag  = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:]))
     adv_noise_init = adv_noise_mag * torch.randn_like(measurement).to(device)
     adv_example_init = measurement + adv_noise_init
@@ -159,17 +174,6 @@ adversarial_noise_image = PAdam_DIP_x(
 #"""
 
 # --------- Untargeted attack ---------------------------------'
-# set unet in evaluation mode
-unet.eval()
-for p in unet.parameters():
-    p.requires_grad = False
-
-xhat0 = unet.forward(z_tilde)
-
-from torchvision.utils import save_image
-plotdir = os.path.join(config.PLOT_PATH, "adversarial_plots", "DIP", "test_adv_rec")
-save_image(xhat0.norm(p=2, dim=(0,1)).detach().cpu(), os.path.join(plotdir, "xhat0_DIP_adv_attack.png") )
-
 adv_param = {
     "codomain_dist" : loss_adv_partial,
     "domain_dist"   : None,
@@ -193,7 +197,7 @@ measurement = untargeted_attack(
     t_out_ref = v_tar_complex,  # x0_batch,
     **adv_param
 ).detach()
-torch.save( measurement, os.getcwd() + "/adv_attack_dip/adv_example_noiserel%.2f_%s"%(noise_rel, file_param))
+torch.save( measurement, os.getcwd() + "/adv_attack_dip/adv_example_noiserel%.2f_%s_%iiter.pt"%(noise_rel, file_param, nepochs))
 
 #--------------------------------------------------------------
 

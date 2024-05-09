@@ -79,7 +79,7 @@ def loss_func(pred, tar):
     )
 
 # set training parameters
-num_epochs = 20000
+num_epochs = 8000
 init_lr = 1e-4
 savedir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2", "adv_rec")
 if not os.path.exists(savedir):
@@ -113,17 +113,22 @@ noiserel = 8e-2
 perturbed_measurement = torch.load(os.path.join(
     os.getcwd(), 
     "adv_attack_dip", 
-    "adv_example_noiserel%.2f_DIP_UNet_nojit_lr_0.0001_gamma_0.99_step_100_sp_%s_sr%.2f_a2_last.pt"%(noiserel, sp_type, sampling_rate)
+    "adv_example_noiserel%.2f_DIP_UNet_nojit_lr_0.0001_gamma_0.99_step_100_sp_%s_sr%.2f_a2_last.pt_%iiter.pt"%(noiserel, sp_type, sampling_rate, num_epochs)
 ) )
 # compute perturbed measurement
 #perturbed_measurement = measurement + adv_noise
 
 # temp dir with network weights and z_tilde
 #param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP")
-param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2")
+#param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "a2")
+param_dir = os.path.join(config.RESULTS_PATH_KADINGIR, "DIP", "adv_attacks", "orig_rec", "noiseless_meas", "%iiter"%num_epochs)
 
 # init noise vector (as input to the model) z ~ U(0,1/10) - DIP paper SR setting
-z_tilde = torch.load(os.path.join(param_dir, "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
+z_tilde = torch.load(os.path.join(
+    config.RESULTS_PATH_KADINGIR, "DIP","sampling_rate_experiment", 
+    "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)
+) )
+#z_tilde = torch.load(os.path.join(param_dir, "z_tilde_%s_%.2f.pt"%(sp_type, sampling_rate)) )
 z_tilde = z_tilde.to(device)
 
 # load model weights
@@ -161,11 +166,12 @@ from dip_utils import get_img_rec#, center_scale_01
 
 ###### Save parameters of DIP model
 path = train_params["save_path"]
-fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_noiserel{noiserel}".format(
+fn_suffix = "lr_{lr}_gamma_{gamma}_sp_{sampling_pattern}_noiserel{noiserel}{additional}".format(
     lr               = init_lr, 
     gamma            = train_params["scheduler_params"]["gamma"],
     sampling_pattern = "%s_sr%.2f"%(sp_type, sampling_rate),
     noiserel         = "%i"%(int(100*noiserel)),
+    additional       = "%iiter"%num_epochs,
 )
 
 # -------- training loop ---------------------------------

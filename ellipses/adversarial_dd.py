@@ -139,7 +139,7 @@ if adversarial_measurement:
     loss_adv_partial = partial(loss_adv_example,  meas_op = OpA, beta = 1e-3)
     # init input optimizer for adversarial examples/measurements (PGD or alternative methods like PAdam)
     adv_init_fac     = 3
-    noise_rel        = 6e-2
+    noise_rel        = 8e-2
     adv_noise_mag    = adv_init_fac * noise_rel * measurement.norm(p=2) / np.sqrt(np.prod(measurement.shape[-2:]))
     adv_noise_init   = adv_noise_mag * torch.randn_like(measurement).to(device)
     adv_example_init = measurement.clone() + adv_noise_init.clone()

@@ -103,9 +103,19 @@ train_data.files = [x for x in train_data.files if "%.5i"%sample_idx in x]
 sample = torch.load(train_data.files[0])
 """
 # ------ Load sample and reconstruct image -------
-sample_idx = 21
-sample = torch.load(os.path.join(config.DATA_PATH, "val", "sample_%.5i_text.pt"%sample_idx) )
+sample_idx = 0#21
+#sample = torch.load(os.path.join(config.DATA_PATH, "val", "sample_%.5i_text.pt"%sample_idx) )
+sample = torch.load(os.path.join(config.DATA_PATH, "train", "sample_%.5i.pt"%sample_idx) )
 measurement = OpA(to_complex(sample[None, None])).to(device)
+adj_meas = OpA.adj(measurement).cpu()
+torchvision.utils.save_image(
+    adj_meas.norm(p=2, dim=(0,1)), 
+    os.path.join(config.PLOT_PATH, "adjoint_rec", "adjoint_%s_sr%.2f_%s_nlevel50_r0_2.png"%(sp_type, sampling_rate, "_a1") )
+)
+torchvision.utils.save_image(
+    sample,
+    os.path.join(config.PLOT_PATH, "adjoint_rec", "sample%.5i.png"%(sample_idx) )
+)
 
 # ----- Reconstruct sample ------
 unet.eval()

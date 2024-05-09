@@ -6,7 +6,7 @@
 # general imports
 import os, sys
 import matplotlib as mpl
-import torch
+import torch, numpy as np
 from torchvision.utils import save_image
 from piq import psnr, ssim
 # local imports
@@ -35,20 +35,27 @@ if gpu_avail:
 
 # ----- measurement configuration -----
 sr_list = [0.03, 0.05, 0.07, 0.10, 0.15, 0.17, 0.20, 0.23, 0.25]
-sampling_rate = sr_list[-3]
+sampling_rate = sr_list[-1]
 #sampling_rate = sr_list[int(sys.argv[1])]
 print("sampling rate used is :", sampling_rate)
-sp_type = "circle" # "diamond", "radial"
+sp_type = "circle"
+"""
+mask_func = RadialMaskFunc(config.n, 17)
+mask = mask_func((1,) + config.n + (1,))
+mask = mask.squeeze(-1)
+mask = mask.unsqueeze(1)
+#"""
 mask_fromfile = MaskFromFile(
     # -------- a=1 Samplig patterns --------------------
-    path = os.path.join(config.SP_PATH, "circle"), 
+    path = os.path.join(config.SP_PATH, "%s"%sp_type), 
     filename = "multilevel_sampling_pattern_%s_sr%.2f_a1_r0_2_levels50.png"%(sp_type, sampling_rate)
     # -------- a=2 Samplig patterns --------------------
     #path = config.SP_PATH,
     #filename = "multilevel_sampling_pattern_sr2.500000e-01_a2_r0_2_levels50.png",
 )
-# Fourier matrix
 mask = mask_fromfile.mask[None]
+#"""
+# Fourier matrix
 OpA_m = Fourier_m(mask)
 # Fourier operator
 OpA = Fourier(mask)
@@ -82,6 +89,11 @@ deep_decoder_params = {
 deep_decoder = DeepDecoder(**deep_decoder_params)
 print("The number of paramters in the DeepDecoder is :", sum(p.numel() for p in deep_decoder.parameters() if p.requires_grad) )
 print("The input is of size ", 256**2*2)
+
+if deep_decoder.device == torch.device("cpu"):
+    deep_decoder = deep_decoder.to(device)
+assert gpu_avail and deep_decoder.device == device, "for some reason DeepDecoder is on %s even though gpu avail %s"%(deep_decoder.device, gpu_avail)
+
 # ----- training configuration -----
 mseloss = torch.nn.MSELoss(reduction="sum")
 def loss_func(pred, tar):
@@ -98,7 +110,8 @@ train_params = {
     "loss_func": loss_func,
     #"save_path": os.path.join(config.RESULTS_PATH,"DeepDecoder"),
     #"save_path": os.path.join(config.SCRATCH_PATH,"DeepDecoder", "%s_sr%.2f"%(sp_type, sampling_rate)),
-    "save_path": os.path.join(config.RESULTS_PATH_KADINGIR,"DeepDecoder", "%s_sr%.2f_a1"%(sp_type, sampling_rate)),
+    #"save_path": os.path.join(config.RESULTS_PATH_KADINGIR,"DeepDecoder", "%s_sr%.2f_a1"%(sp_type, sampling_rate)),
+    "save_path": os.path.join(config.RESULTS_PATH_KADINGIR,"DeepDecoder", "noisy", "%s_sr%.2f_a1"%(sp_type, sampling_rate)),
     #"save_path": os.path.join(config.RESULTS_PATH_KADINGIR,"DeepDecoder", "%s_sr%.2f_a2"%(sp_type, sampling_rate)),
     "save_epochs": num_epochs//10,
     "optimizer_params": {"lr": init_lr, "eps": 1e-8, "weight_decay": 0},
@@ -130,9 +143,7 @@ if not os.path.isfile(fn_init_weights):
 #deep_decoder.load_state_dict(init_weights) 
 #del init_weights
 
-if deep_decoder.device == torch.device("cpu"):
-    deep_decoder = deep_decoder.to(device)
-assert gpu_avail and deep_decoder.device == device, "for some reason DeepDecoder is on %s even though gpu avail %s"%(deep_decoder.device, gpu_avail)
+
 # get train and validation data
 # Vegard's scratch folder
 #dir_train = "/mn/nam-shub-02/scratch/vegarant/pytorch_datasets/fastMRI/train/"
@@ -141,17 +152,20 @@ assert gpu_avail and deep_decoder.device == device, "for some reason DeepDecoder
 dir_train = os.path.join(config.DATA_PATH, "train")
 dir_val   = os.path.join(config.DATA_PATH, "val")
 # Load one sample to train network on
-sample_idx = 21
-#sample = torch.load(os.path.join(dir_train,"sample_%.5i.pt"%sample_idx))      # fastmri original
-sample = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) ) # fastmri with textual detail
+sample_idx = 0
+sample = torch.load(os.path.join(dir_train,"sample_%.5i.pt"%sample_idx))      # fastmri original
+#sample = torch.load(os.path.join(dir_val, "sample_%.5i_text.pt"%sample_idx) ) # fastmri with textual detail
 #sample = torch.load(os.path.join(dir_train,"sample_%i.pt"%sample_idx))        # ellipses dataset
 sample = to_complex(sample[None,None])
 # simulate measurements by applying the Fourier transform
 measurement = OpA(sample)
 measurement = measurement.to(device)
+meas_noise_std = 0.08 * measurement.norm(p=2) / np.sqrt(np.prod( measurement.shape[-2:] ) )
+meas_noise = meas_noise_std * torch.randn_like(measurement)
+measurement += meas_noise 
+print(" l2-norm of Gaussaian noise : ", meas_noise.norm(p=2)/ OpA(sample).norm(p=2) ) 
 
-
-# Deep decoder input
+# ---------- Deep decoder input -------------------
 # height and width of input vector
 # deep_decoder.nsacles = number of layers
 in_hw = 256//2**(deep_decoder.nscales-1) # of nlayers = 5 then in_hw = 256//2**4 = 256//16 = 16

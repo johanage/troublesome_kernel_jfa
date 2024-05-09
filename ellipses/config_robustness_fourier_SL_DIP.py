@@ -402,7 +402,7 @@ _append_net(
         "name_save"     : "dip_unet_jit_plus_jit_meas",
         "plt_color"     : "#fc7272",
         "plt_marker"    : "+",
-        "plt_linestyle" : "--",
+        "plt_linestyle" : "-",
         "plt_linewidth" : 2.75,
     },
     net = UNet(**dip_unet_params),
@@ -469,7 +469,7 @@ _append_net(
 _append_net(
     "Supervised UNet jit very high noise",
     {
-        "name_disp"     : "Supervised UNet w/ very high noise",
+        "name_disp"     : "Supervised UNet w/ high noise",
         "name_save"     : "unet_jit_very_high_noise",
         "plt_color"     : "#000000",
         "plt_marker"    : "^",
@@ -497,7 +497,7 @@ _append_net(
 _append_net(
     "Supervised UNet jit",
     {
-        "name_disp"     : "Supervised UNet w/ high noise",
+        "name_disp"     : "Supervised UNet w/ moderate noise",
         "name_save"     : "unet_jit_high_noise",
         "plt_color"     : "#5c5c5c",
         "plt_marker"    : "s",
