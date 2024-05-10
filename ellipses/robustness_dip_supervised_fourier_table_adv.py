@@ -38,10 +38,10 @@ methods = methods.loc[methods_include]
 # select methods excluded from (re-)performing attacks
 methods_no_calc = [
     "DeepDecoder no jit",
-    #"DIP UNet no jit",
+    "DIP UNet no jit",
     "DIP UNet no jit 2/3 iterations",
     "DIP UNet no jit 1/3 iterations",
-    "DIP UNet jit",
+    #"DIP UNet jit",
     "Supervised UNet no jit",
     "Supervised UNet jit low noise",
     "Supervised UNet jit",
