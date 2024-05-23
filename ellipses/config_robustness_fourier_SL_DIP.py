@@ -416,7 +416,7 @@ _append_net(
             f_scheduler  = dip_f_lr_scheduler,
             OpA          = OpA,
             epochs       = dip_nepochs,
-            jitter_level = 10,
+            jitter_level = 0.1,
         ),
         "rec_func_adv_noise" : lambda y, xhat : xhat,
         "codomain_distance"  : loss_adv_partial,

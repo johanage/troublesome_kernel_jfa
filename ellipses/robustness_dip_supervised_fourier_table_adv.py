@@ -24,7 +24,7 @@ methods_include = [
     "DIP UNet no jit",
     "DIP UNet no jit 2/3 iterations",
     "DIP UNet no jit 1/3 iterations",
-    "DIP UNet jit",
+    #"DIP UNet jit",
     #"Supervised UNet no jit",
     #"Supervised UNet jit low noise",
     #"Supervised UNet jit",
@@ -40,8 +40,8 @@ methods_no_calc = [
     "DeepDecoder no jit",
     "DIP UNet no jit",
     "DIP UNet no jit 2/3 iterations",
-    "DIP UNet no jit 1/3 iterations",
-    #"DIP UNet jit",
+    #"DIP UNet no jit 1/3 iterations",
+    "DIP UNet jit",
     "Supervised UNet no jit",
     "Supervised UNet jit low noise",
     "Supervised UNet jit",
@@ -64,7 +64,7 @@ save_table = True
 # selecting sample numbers 50, ..., 59
 samples = tuple(range(50, 60))
 
-it_init = 4
+it_init = 3
 keep_init = 3
 
 # select range relative noise
@@ -213,10 +213,12 @@ for (idx, method) in methods.iterrows():
                 )
 
 # save results
-for idx in results.index:
-    results_save.loc[idx] = results.loc[idx]
-os.makedirs(save_path, exist_ok=True)
-results_save.to_pickle(save_results)
+save_results = True
+if save_results:
+    for idx in results.index:
+        results_save.loc[idx] = results.loc[idx]
+    os.makedirs(save_path, exist_ok=True)
+    results_save.to_pickle(save_results)
 
 # ----- plotting -----
 
@@ -258,8 +260,8 @@ if do_plot:
                 )
 
     ax.set_yticks(np.arange(0, 1, step=0.05))
-    ax.set_ylim((0.05, 0.13)) # DIP
-    #ax.set_ylim((0.05, 0.18))  # supervised
+    #ax.set_ylim((0.05, 0.13)) # DIP
+    ax.set_ylim((0.05, 0.18))  # supervised
     for a in (ax, ax_std):
         a.set_xticklabels(["{:,.0%}".format(x) for x in ax.get_xticks()])
         a.set_yticklabels(["{:,.0%}".format(x) for x in ax.get_yticks()])
